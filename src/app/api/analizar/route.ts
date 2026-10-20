@@ -1,11 +1,10 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { ApiError, GoogleGenAI, type Part } from "@google/genai";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 export const maxDuration = 60;
 
-let client: Anthropic | null = null;
+let client: GoogleGenAI | null = null;
 
 const Ficha = z.object({
   nombre: z.string().describe("Nombre comercial corto del repuesto, en español rioplatense. Ej: 'Alternador 90A'"),
@@ -30,6 +29,9 @@ const Imagen = z.object({
   data: z.string(),
   media_type: z.enum(["image/jpeg", "image/png", "image/webp"]),
 });
+const FICHA_SCHEMA = z.toJSONSchema(Ficha) as Record<string, unknown>;
+delete FICHA_SCHEMA.$schema; // Gemini no necesita el $schema
+
 const Body = z.object({
   imagenes: z.array(Imagen).max(8).default([]),
   codigo_barras: z.string().optional(),
@@ -43,40 +45,36 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Mandá al menos una foto o un código" }, { status: 400 });
   }
 
-  const content: Anthropic.ContentBlockParam[] = imagenes.map((img) => ({
-    type: "image",
-    source: { type: "base64", media_type: img.media_type, data: img.data },
-  }));
-  content.push({
-    type: "text",
+  const parts: Part[] = imagenes.map((img) => ({ inlineData: { mimeType: img.media_type, data: img.data } }));
+  parts.push({
     text: codigo_barras
       ? `Código de barras escaneado: ${codigo_barras}. Completá la ficha del repuesto.`
       : "Completá la ficha del repuesto.",
   });
 
   try {
-    client ??= new Anthropic();
-    const response = await client.messages.parse({
-      model: process.env.ANTHROPIC_MODEL || "claude-opus-5-5",
-      max_tokens: 16000,
-      system: SYSTEM,
-      // "low" prioriza velocidad: es una extracción visual, no un problema de razonamiento largo.
-      output_config: { effort: "low", format: zodOutputFormat(Ficha) },
-      messages: [{ role: "user", content }],
+    client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const response = await client.models.generateContent({
+      // Flash: rápido y barato, alcanza para leer etiquetas e identificar piezas.
+      model: process.env.GEMINI_MODEL || "gemini-flash-latest",
+      contents: [{ role: "user", parts }],
+      config: {
+        systemInstruction: SYSTEM,
+        responseMimeType: "application/json",
+        responseJsonSchema: FICHA_SCHEMA,
+      },
     });
 
-    if (response.stop_reason === "refusal" || !response.parsed_output) {
+    const ficha = Ficha.safeParse(JSON.parse(response.text ?? "null"));
+    if (!ficha.success) {
       return NextResponse.json({ error: "La IA no pudo analizar este repuesto. Cargalo a mano." }, { status: 422 });
     }
-    return NextResponse.json(response.parsed_output);
+    return NextResponse.json(ficha.data);
   } catch (e) {
-    if (e instanceof Anthropic.RateLimitError) {
+    if (e instanceof ApiError && e.status === 429) {
       return NextResponse.json({ error: "Muchas consultas seguidas, probá en unos segundos" }, { status: 429 });
     }
-    if (e instanceof Anthropic.APIError) {
-      console.error("Anthropic", e.status, e.message);
-      return NextResponse.json({ error: "Error de la IA, probá de nuevo" }, { status: 502 });
-    }
-    throw e;
+    console.error("Gemini", e);
+    return NextResponse.json({ error: "Error de la IA, probá de nuevo" }, { status: 502 });
   }
 }
