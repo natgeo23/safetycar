@@ -3,7 +3,11 @@ import { AUTH_COOKIE, authToken } from "@/lib/auth";
 
 export async function proxy(request: NextRequest) {
   const pin = process.env.APP_PIN;
-  if (!pin) return NextResponse.next(); // sin PIN configurado, acceso libre (solo desarrollo)
+  if (!pin) {
+    // Sin PIN: libre en desarrollo, cerrado en producción para no exponer el stock.
+    if (process.env.NODE_ENV !== "production") return NextResponse.next();
+    return new NextResponse("Falta configurar APP_PIN en Vercel", { status: 503 });
+  }
 
   const cookie = request.cookies.get(AUTH_COOKIE)?.value;
   if (cookie && cookie === (await authToken(pin))) return NextResponse.next();
