@@ -123,7 +123,10 @@ export default function Cargar() {
     setEstado("guardando");
     setError(null);
     try {
-      const urls = await Promise.all(fotos.map((f) => subidas.current.get(f.id)!));
+      // Si alguna subida en segundo plano falló, se reintenta una vez antes de guardar.
+      const urls = await Promise.all(
+        fotos.map((f) => subidas.current.get(f.id)!.catch(() => subirFotos([f]).then((u) => u[0]))),
+      );
       const res = await fetch("/api/repuestos", {
         method: "POST",
         headers: { "content-type": "application/json" },

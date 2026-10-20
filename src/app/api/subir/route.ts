@@ -18,6 +18,9 @@ export async function POST(request: Request) {
     }),
   ).catch((e: Error) => e);
 
-  if (urls instanceof Error) return NextResponse.json({ error: urls.message }, { status: 500 });
+  if (urls instanceof Error) {
+    console.error("Supabase storage:", urls.message);
+    return NextResponse.json({ error: `Storage: ${urls.message}` }, { status: 500 });
+  }
   return NextResponse.json(urls);
 }

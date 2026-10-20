@@ -60,7 +60,10 @@ export async function subirFotos(fotos: Foto[]): Promise<string[]> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ cantidad: fotos.length }),
   });
-  if (!res.ok) throw new Error("No se pudieron preparar las subidas");
+  if (!res.ok) {
+    const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(`No se pudieron preparar las subidas (${error})`);
+  }
   const urls: { uploadUrl: string; publicUrl: string }[] = await res.json();
 
   await Promise.all(
