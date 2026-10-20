@@ -1,36 +1,31 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Safetycar · Stock con IA (MVP)
 
-## Getting Started
+PWA para inventariar los repuestos del taller: sacás foto(s), un video o escaneás el código de barras,
+la IA (Claude) precarga nombre, marca, código OEM, categoría, compatibilidad, estado y descripción,
+y queda en stock. Next.js 16 + Supabase, deploy en Vercel.
 
-First, run the development server:
+## Puesta en marcha (≈10 min)
+
+1. **Supabase**: crear proyecto → SQL Editor → pegar y ejecutar [`supabase/schema.sql`](supabase/schema.sql)
+   (crea las tablas `repuestos` y `movimientos`, la función `ajustar_stock` y el bucket público `repuestos`).
+2. **Anthropic**: crear una API key en console.anthropic.com.
+3. **Variables** (ver [`.env.example`](.env.example)): copiar a `.env.local` para desarrollo y cargarlas en
+   Vercel → Settings → Environment Variables:
+   `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `APP_PIN`, `AUTH_SECRET`.
+4. **Vercel**: subir el repo a GitHub → Import Project en Vercel → Deploy. No necesita configuración extra.
+5. En el celu: abrir la URL → Compartir/Menú → **Agregar a pantalla de inicio**.
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Cómo está armado
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `src/app/cargar` – flujo de carga. Las fotos se achican en el celu (1280 px) y se suben directo a Supabase
+  Storage con URLs firmadas mientras la IA analiza, así el guardado es inmediato. El video se convierte en 5 cuadros.
+- `src/app/api/analizar` – llamada a Claude con salida estructurada (Zod). Modelo configurable con `ANTHROPIC_MODEL`.
+- `src/app/page.tsx` – stock con búsqueda y +/- de unidades (cada ajuste queda en `movimientos`).
+- `src/proxy.ts` – acceso por PIN compartido. La base solo se toca desde el servidor con la service role;
+  RLS está activo sin políticas, así que la anon key no tiene acceso.
+- Campo `publicado` y fotos públicas listos para conectar el e-commerce después.

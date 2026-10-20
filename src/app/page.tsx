@@ -1,69 +1,107 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import type { Repuesto } from "@/lib/types";
+
+export default function Stock() {
+  const [items, setItems] = useState<Repuesto[] | null>(null);
+  const [q, setQ] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/repuestos?q=${encodeURIComponent(q)}`, { signal: ctrl.signal, cache: "no-store" });
+        const data = await res.json().catch(() => ({ error: "No se pudo conectar con el servidor" }));
+        if (!res.ok) throw new Error(data.error);
+        setItems(data);
+        setError(null);
+      } catch (e) {
+        if ((e as Error).name !== "AbortError") setError((e as Error).message || "No se pudo cargar el stock");
+      }
+    }, q ? 250 : 0);
+    return () => { clearTimeout(t); ctrl.abort(); };
+  }, [q]);
+
+  async function ajustar(id: string, delta: number) {
+    setItems((xs) => xs?.map((x) => (x.id === id ? { ...x, cantidad: Math.max(0, x.cantidad + delta) } : x)) ?? null);
+    const res = await fetch(`/api/repuestos/${id}/stock`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ delta, motivo: delta > 0 ? "ingreso" : "egreso" }),
+    });
+    if (res.ok) {
+      const { cantidad } = await res.json();
+      setItems((xs) => xs?.map((x) => (x.id === id ? { ...x, cantidad } : x)) ?? null);
+    }
+  }
+
+  const unidades = items?.reduce((s, x) => s + x.cantidad, 0) ?? 0;
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="mx-auto w-full max-w-xl px-4 pb-32 pt-4">
+      <header className="mb-4 flex items-end justify-between">
+        <div>
+          <p className="logo text-2xl">Safetycar</p>
+          <div className="mt-1 h-0.5 w-24 bg-brand" />
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        {items && <p className="text-right text-sm text-mute">{items.length} ítems · {unidades} u.</p>}
+      </header>
+
+      <input
+        type="search"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Buscar por nombre, marca, código, auto…"
+        className="w-full rounded-xl border border-line bg-surface px-4 py-3 text-base placeholder:text-mute focus:border-brand focus:outline-none"
+      />
+
+      {error && <p className="mt-4 rounded-xl bg-red-500/15 p-3 text-sm text-red-200">{error}</p>}
+
+      {!items && !error && (
+        <div className="mt-4 space-y-3">{[0, 1, 2].map((i) => <div key={i} className="h-24 animate-pulse rounded-xl bg-surface" />)}</div>
+      )}
+
+      {items?.length === 0 && (
+        <div className="mt-16 text-center text-mute">
+          <p className="text-lg">{q ? "Sin resultados" : "Todavía no hay repuestos cargados"}</p>
+          {!q && <p className="mt-1 text-sm">Tocá el botón verde para empezar</p>}
         </div>
-      </main>
-    </div>
+      )}
+
+      <ul className="mt-4 space-y-3">
+        {items?.map((r) => (
+          <li key={r.id} className="flex gap-3 rounded-xl border border-line bg-surface p-3">
+            <Link href={`/repuesto/${r.id}`} className="flex min-w-0 flex-1 gap-3">
+              {r.fotos[0] ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={r.fotos[0]} alt="" loading="lazy" className="h-20 w-20 shrink-0 rounded-lg object-cover" />
+              ) : (
+                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg bg-ink text-2xl text-mute">⚙</div>
+              )}
+              <div className="min-w-0">
+                <p className="truncate font-semibold">{r.nombre}</p>
+                <p className="truncate text-sm text-mute">{[r.marca, r.codigo].filter(Boolean).join(" · ") || "—"}</p>
+                {r.ubicacion && <p className="truncate text-xs text-mute">📍 {r.ubicacion}</p>}
+              </div>
+            </Link>
+            <div className="flex shrink-0 flex-col items-center justify-between">
+              <button onClick={() => ajustar(r.id, 1)} className="h-8 w-10 rounded-lg bg-ink text-lg" aria-label="Sumar uno">+</button>
+              <span className={`font-bold ${r.cantidad <= r.stock_minimo ? "text-amber-300" : "text-brand"}`}>{r.cantidad}</span>
+              <button onClick={() => ajustar(r.id, -1)} disabled={r.cantidad === 0} className="h-8 w-10 rounded-lg bg-ink text-lg disabled:opacity-30" aria-label="Restar uno">−</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <Link
+        href="/cargar"
+        className="fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] mx-auto block max-w-xl rounded-2xl bg-brand py-5 text-center text-lg font-bold text-ink shadow-[0_8px_30px_rgba(0,214,107,0.35)] active:scale-[0.98]"
+      >
+        + Cargar repuestos
+      </Link>
+    </main>
   );
 }

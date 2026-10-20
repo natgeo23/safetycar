@@ -1,26 +1,31 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
+/* Paleta del Manual de Marca Safetycar v1 */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-ink: #080a0c;
+  --color-surface: #14181c;
+  --color-line: #262c32;
+  --color-mute: #737b83;
+  --color-light: #d4d8dc;
+  --color-brand: #00d66b;
+  --font-sans: var(--font-titillium), system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-ink);
+  color: #fff;
+  font-family: var(--font-sans);
+  padding-top: env(safe-area-inset-top);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.logo {
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: -0.02em;
+  color: var(--color-light);
 }
