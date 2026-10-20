@@ -7,7 +7,7 @@
   --color-line: #262c32;
   --color-mute: #737b83;
   --color-light: #d4d8dc;
-  --color-brand: #00d66b;
+  --color-brand: #20b486;
   --font-sans: var(--font-titillium), system-ui, sans-serif;
 }
 
@@ -21,11 +21,4 @@ body {
   font-family: var(--font-sans);
   padding-top: env(safe-area-inset-top);
   -webkit-tap-highlight-color: transparent;
-}
-
-.logo {
-  font-weight: 900;
-  font-style: italic;
-  letter-spacing: -0.02em;
-  color: var(--color-light);
 }

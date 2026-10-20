@@ -10,9 +10,9 @@ const titillium = Titillium_Web({
 });
 
 export const metadata: Metadata = {
-  title: "Safetycar Stock",
+  title: "Safety Car Stock",
   description: "Inventario de repuestos con IA",
-  appleWebApp: { capable: true, title: "Safetycar", statusBarStyle: "black-translucent" },
+  appleWebApp: { capable: true, title: "Safety Car", statusBarStyle: "black-translucent" },
 };
 
 export const viewport: Viewport = {

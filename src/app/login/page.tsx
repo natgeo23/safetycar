@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Logo } from "@/components/Logo";
 
 export default function Login() {
   const [pin, setPin] = useState("");
@@ -20,8 +21,7 @@ export default function Login() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center px-6">
-      <p className="logo text-center text-4xl">Safetycar</p>
-      <div className="mx-auto mt-2 h-1 w-32 bg-brand" />
+      <Logo className="self-center text-4xl" />
       <p className="mt-6 text-center text-mute">Stock del taller</p>
       <form onSubmit={entrar} className="mt-8 space-y-4">
         <input

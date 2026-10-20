@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Logo } from "@/components/Logo";
 import type { Repuesto } from "@/lib/types";
 
 export default function Stock() {
@@ -42,11 +43,8 @@ export default function Stock() {
 
   return (
     <main className="mx-auto w-full max-w-xl px-4 pb-32 pt-4">
-      <header className="mb-4 flex items-end justify-between">
-        <div>
-          <p className="logo text-2xl">Safetycar</p>
-          <div className="mt-1 h-0.5 w-24 bg-brand" />
-        </div>
+      <header className="mb-4 flex items-center justify-between">
+        <Logo className="text-2xl" />
         {items && <p className="text-right text-sm text-mute">{items.length} ítems · {unidades} u.</p>}
       </header>
 
@@ -98,7 +96,7 @@ export default function Stock() {
 
       <Link
         href="/cargar"
-        className="fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] mx-auto block max-w-xl rounded-2xl bg-brand py-5 text-center text-lg font-bold text-ink shadow-[0_8px_30px_rgba(0,214,107,0.35)] active:scale-[0.98]"
+        className="fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] mx-auto block max-w-xl rounded-2xl bg-brand py-5 text-center text-lg font-bold text-ink shadow-[0_8px_30px_rgba(32,180,134,0.35)] active:scale-[0.98]"
       >
         + Cargar repuestos
       </Link>

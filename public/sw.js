@@ -1,6 +1,6 @@
 // Service worker mínimo: hace instalable la app y cachea los assets estáticos.
 // Los datos (/api) siempre van a la red.
-const CACHE = "safetycar-v1";
+const CACHE = "safetycar-v2";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => {
