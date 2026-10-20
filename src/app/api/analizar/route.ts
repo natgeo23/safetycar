@@ -1,8 +1,11 @@
-import { ApiError, GoogleGenAI, type Part } from "@google/genai";
+import { ApiError, GoogleGenAI, ThinkingLevel, type GenerateContentConfig, type Part } from "@google/genai";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 export const maxDuration = 60;
+
+// Cortamos antes del límite de Vercel para poder devolver un error claro.
+const TIMEOUT_MS = 45_000;
 
 let client: GoogleGenAI | null = null;
 
@@ -52,18 +55,31 @@ export async function POST(request: Request) {
       : "Completá la ficha del repuesto.",
   });
 
+  client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
+  const inicio = Date.now();
+  const config: GenerateContentConfig = {
+    systemInstruction: SYSTEM,
+    responseMimeType: "application/json",
+    responseJsonSchema: FICHA_SCHEMA,
+    // Pensamiento mínimo: es lectura de etiquetas e identificación, no hace falta razonar largo.
+    thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+    abortSignal: AbortSignal.timeout(TIMEOUT_MS),
+  };
+  const generar = (cfg: GenerateContentConfig) =>
+    client!.models.generateContent({ model, contents: [{ role: "user", parts }], config: cfg });
+
   try {
-    client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    const response = await client.models.generateContent({
-      // Flash: rápido y barato, alcanza para leer etiquetas e identificar piezas.
-      model: process.env.GEMINI_MODEL || "gemini-flash-latest",
-      contents: [{ role: "user", parts }],
-      config: {
-        systemInstruction: SYSTEM,
-        responseMimeType: "application/json",
-        responseJsonSchema: FICHA_SCHEMA,
-      },
-    });
+    let response;
+    try {
+      response = await generar(config);
+    } catch (e) {
+      // Modelos que no aceptan thinkingLevel: reintentar con la config por defecto.
+      if (!(e instanceof ApiError && e.status === 400)) throw e;
+      console.warn("Gemini 400, reintento sin thinkingConfig:", e.message);
+      response = await generar({ ...config, thinkingConfig: undefined });
+    }
+    console.log(`Gemini ${model} ${imagenes.length} img en ${Date.now() - inicio} ms`);
 
     const ficha = Ficha.safeParse(JSON.parse(response.text ?? "null"));
     if (!ficha.success) {
@@ -71,10 +87,13 @@ export async function POST(request: Request) {
     }
     return NextResponse.json(ficha.data);
   } catch (e) {
+    console.error(`Gemini falló a los ${Date.now() - inicio} ms`, e);
     if (e instanceof ApiError && e.status === 429) {
-      return NextResponse.json({ error: "Muchas consultas seguidas, probá en unos segundos" }, { status: 429 });
+      return NextResponse.json({ error: "Se alcanzó el límite de consultas de Gemini, probá en un minuto" }, { status: 429 });
     }
-    console.error("Gemini", e);
+    if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
+      return NextResponse.json({ error: "La IA tardó demasiado. Probá de nuevo o cargalo a mano." }, { status: 504 });
+    }
     return NextResponse.json({ error: "Error de la IA, probá de nuevo" }, { status: 502 });
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Escaner } from "@/components/Escaner";
 import { RepuestoForm, VACIO, type FormValues } from "@/components/RepuestoForm";
 import { cuadrosDeVideo, fotoDesdeArchivo, subirFotos, type Foto } from "@/lib/media";
@@ -19,6 +19,7 @@ export default function Cargar() {
   const [escaneando, setEscaneando] = useState(false);
   const [guardados, setGuardados] = useState(0);
   const [aviso, setAviso] = useState<string | null>(null);
+  const [segundos, setSegundos] = useState(0);
   // Subidas en segundo plano: arrancan apenas se saca la foto.
   const subidas = useRef(new Map<string, Promise<string>>());
   const ultimaConsulta = useRef(0); // descarta respuestas de análisis viejos
@@ -142,6 +143,15 @@ export default function Cargar() {
     }
   }
 
+  useEffect(() => {
+    if (estado !== "analizando") return;
+    const t = setInterval(() => setSegundos((n) => n + 1), 1000);
+    return () => {
+      clearInterval(t);
+      setSegundos(0);
+    };
+  }, [estado]);
+
   const ocupado = estado !== "idle";
   const hayMedia = fotos.length > 0 || codigo;
 
@@ -196,7 +206,8 @@ export default function Cargar() {
       {(estado === "procesando" || estado === "analizando") && (
         <div className="mt-4 flex items-center gap-3 rounded-xl border border-brand/40 bg-brand/10 p-4">
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand border-t-transparent" />
-          <span>{estado === "procesando" ? "Procesando…" : "La IA está identificando el repuesto…"}</span>
+          <span className="flex-1">{estado === "procesando" ? "Procesando…" : "La IA está identificando el repuesto…"}</span>
+          {estado === "analizando" && <span className="tabular-nums text-sm text-mute">{segundos}s</span>}
         </div>
       )}
 
