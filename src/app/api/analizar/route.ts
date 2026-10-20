@@ -56,28 +56,44 @@ export async function POST(request: Request) {
   });
 
   client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
+  // Si el modelo principal está saturado (503) o sin cupo (429), probamos el de respaldo.
+  const modelos = [
+    process.env.GEMINI_MODEL || "gemini-flash-latest",
+    process.env.GEMINI_MODEL_RESPALDO || "gemini-flash-lite-latest",
+  ];
   const inicio = Date.now();
   const config: GenerateContentConfig = {
     systemInstruction: SYSTEM,
     responseMimeType: "application/json",
     responseJsonSchema: FICHA_SCHEMA,
-    // Pensamiento mínimo: es lectura de etiquetas e identificación, no hace falta razonar largo.
-    thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+    // Pensamiento bajo: es lectura de etiquetas e identificación, no hace falta razonar largo.
+    thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
     abortSignal: AbortSignal.timeout(TIMEOUT_MS),
   };
-  const generar = (cfg: GenerateContentConfig) =>
-    client!.models.generateContent({ model, contents: [{ role: "user", parts }], config: cfg });
+
+  async function generar(model: string) {
+    try {
+      return await client!.models.generateContent({ model, contents: [{ role: "user", parts }], config });
+    } catch (e) {
+      // Modelos que no aceptan thinkingLevel: reintentar con la config por defecto.
+      if (!(e instanceof ApiError && e.status === 400 && /thinking/i.test(e.message))) throw e;
+      console.warn(`Gemini ${model} sin thinkingLevel:`, e.message);
+      return client!.models.generateContent({
+        model, contents: [{ role: "user", parts }], config: { ...config, thinkingConfig: undefined },
+      });
+    }
+  }
 
   try {
     let response;
+    let model = modelos[0];
     try {
-      response = await generar(config);
+      response = await generar(model);
     } catch (e) {
-      // Modelos que no aceptan thinkingLevel: reintentar con la config por defecto.
-      if (!(e instanceof ApiError && e.status === 400)) throw e;
-      console.warn("Gemini 400, reintento sin thinkingConfig:", e.message);
-      response = await generar({ ...config, thinkingConfig: undefined });
+      if (!(e instanceof ApiError && [429, 500, 503].includes(e.status))) throw e;
+      console.warn(`Gemini ${model} respondió ${e.status}, pruebo ${modelos[1]}`);
+      model = modelos[1];
+      response = await generar(model);
     }
     console.log(`Gemini ${model} ${imagenes.length} img en ${Date.now() - inicio} ms`);
 
@@ -90,6 +106,9 @@ export async function POST(request: Request) {
     console.error(`Gemini falló a los ${Date.now() - inicio} ms`, e);
     if (e instanceof ApiError && e.status === 429) {
       return NextResponse.json({ error: "Se alcanzó el límite de consultas de Gemini, probá en un minuto" }, { status: 429 });
+    }
+    if (e instanceof ApiError && e.status === 503) {
+      return NextResponse.json({ error: "Gemini está saturado en este momento, probá de nuevo en unos segundos" }, { status: 503 });
     }
     if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
       return NextResponse.json({ error: "La IA tardó demasiado. Probá de nuevo o cargalo a mano." }, { status: 504 });
