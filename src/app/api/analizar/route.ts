@@ -6,6 +6,8 @@ export const maxDuration = 60;
 
 // Cortamos antes del límite de Vercel para poder devolver un error claro.
 const TIMEOUT_MS = 45_000;
+// Si el modelo principal no contestó en este tiempo, se lanza también el de respaldo.
+const HEDGE_MS = 12_000;
 
 let client: GoogleGenAI | null = null;
 
@@ -56,46 +58,61 @@ export async function POST(request: Request) {
   });
 
   client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  // Si el modelo principal está saturado (503) o sin cupo (429), probamos el de respaldo.
-  const modelos = [
-    process.env.GEMINI_MODEL || "gemini-flash-latest",
-    process.env.GEMINI_MODEL_RESPALDO || "gemini-flash-lite-latest",
-  ];
+  const principal = process.env.GEMINI_MODEL || "gemini-flash-latest";
+  const respaldo = process.env.GEMINI_MODEL_RESPALDO || "gemini-flash-lite-latest";
   const inicio = Date.now();
-  const config: GenerateContentConfig = {
+  const limite = AbortSignal.timeout(TIMEOUT_MS);
+  const base: GenerateContentConfig = {
     systemInstruction: SYSTEM,
     responseMimeType: "application/json",
     responseJsonSchema: FICHA_SCHEMA,
     // Pensamiento bajo: es lectura de etiquetas e identificación, no hace falta razonar largo.
     thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-    abortSignal: AbortSignal.timeout(TIMEOUT_MS),
   };
 
-  async function generar(model: string) {
+  async function generar(model: string, signal: AbortSignal) {
+    const pedir = (config: GenerateContentConfig) =>
+      client!.models.generateContent({ model, contents: [{ role: "user", parts }], config: { ...config, abortSignal: signal } });
     try {
-      return await client!.models.generateContent({ model, contents: [{ role: "user", parts }], config });
+      return await pedir(base);
     } catch (e) {
       // Modelos que no aceptan thinkingLevel: reintentar con la config por defecto.
       if (!(e instanceof ApiError && e.status === 400 && /thinking/i.test(e.message))) throw e;
       console.warn(`Gemini ${model} sin thinkingLevel:`, e.message);
-      return client!.models.generateContent({
-        model, contents: [{ role: "user", parts }], config: { ...config, thinkingConfig: undefined },
-      });
+      return pedir({ ...base, thinkingConfig: undefined });
     }
   }
 
+  // Pedido "con cobertura": arranca el principal y, si a los HEDGE_MS no contestó (o falló),
+  // lanza el de respaldo en paralelo. Gana el primero que responda; el otro se cancela.
+  const ctrlP = new AbortController();
+  const ctrlR = new AbortController();
+  let lanzarRespaldo!: () => void;
+  const respaldoListo = new Promise<void>((ok) => (lanzarRespaldo = ok));
+  const timer = setTimeout(() => lanzarRespaldo(), HEDGE_MS);
+
+  const pPrincipal = generar(principal, AbortSignal.any([limite, ctrlP.signal]))
+    .then((r) => ({ r, model: principal }))
+    .catch((e) => {
+      lanzarRespaldo();
+      throw e;
+    });
+  const pRespaldo = respaldoListo.then(() =>
+    generar(respaldo, AbortSignal.any([limite, ctrlR.signal])).then((r) => ({ r, model: respaldo })),
+  );
+
   try {
-    let response;
-    let model = modelos[0];
+    let ganador;
     try {
-      response = await generar(model);
+      ganador = await Promise.any([pPrincipal, pRespaldo]);
     } catch (e) {
-      if (!(e instanceof ApiError && [429, 500, 503].includes(e.status))) throw e;
-      console.warn(`Gemini ${model} respondió ${e.status}, pruebo ${modelos[1]}`);
-      model = modelos[1];
-      response = await generar(model);
+      throw e instanceof AggregateError ? e.errors[0] : e;
+    } finally {
+      clearTimeout(timer);
     }
-    console.log(`Gemini ${model} ${imagenes.length} img en ${Date.now() - inicio} ms`);
+    (ganador.model === principal ? ctrlR : ctrlP).abort();
+    const response = ganador.r;
+    console.log(`Gemini ${ganador.model} ${imagenes.length} img en ${Date.now() - inicio} ms`);
 
     const ficha = Ficha.safeParse(JSON.parse(response.text ?? "null"));
     if (!ficha.success) {
