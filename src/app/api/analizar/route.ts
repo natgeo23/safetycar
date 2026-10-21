@@ -1,6 +1,7 @@
 import { ApiError, GoogleGenAI, ThinkingLevel, type GenerateContentConfig, type Part } from "@google/genai";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { registrarUso } from "@/lib/ia-uso";
 
 export const maxDuration = 60;
 
@@ -113,6 +114,7 @@ export async function POST(request: Request) {
     (ganador.model === principal ? ctrlR : ctrlP).abort();
     const response = ganador.r;
     console.log(`Gemini ${ganador.model} ${imagenes.length} img en ${Date.now() - inicio} ms`);
+    await registrarUso("analizar", ganador.model, response);
 
     const ficha = Ficha.safeParse(JSON.parse(response.text ?? "null"));
     if (!ficha.success) {

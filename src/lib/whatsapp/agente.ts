@@ -1,5 +1,6 @@
 import "server-only";
 import { FunctionCallingConfigMode, GoogleGenAI, ThinkingLevel, type Content, type FunctionDeclaration, type GenerateContentConfig } from "@google/genai";
+import { registrarUso } from "@/lib/ia-uso";
 import { db } from "@/lib/supabase";
 import { promptSistema } from "./taller";
 
@@ -173,6 +174,7 @@ async function carrera(principal: string, respaldo: string, contents: Content[],
     const ganador = await Promise.any([pP, pR]);
     (ganador.model === principal ? ctrlR : ctrlP).abort();
     if (ganador.model !== principal) console.log(`Gemini contestó con ${respaldo}`);
+    await registrarUso("whatsapp", ganador.model, ganador.r);
     return ganador.r;
   } catch (e) {
     throw e instanceof AggregateError ? e.errors.at(-1) : e;
