@@ -3,13 +3,23 @@
 export const FICHA_TALLER = `
 - Nombre: Safety Car (Instagram: @safetycar.arg para el taller y @safetycar.autopartes para repuestos).
 - Rubros: venta de autopartes nuevas y usadas, y taller de chapa y pintura.
-- Dirección: PENDIENTE
-- Horarios de atención: PENDIENTE
+- Dirección: Av. Fleming 2313, Martínez (San Isidro). Es el único local, no hay sucursales.
+- Horarios de atención: lunes a viernes de 9 a 17 hs. Sábados, domingos y feriados cerrado.
+- Envíos: a todo el país. Costo y demora del envío: PENDIENTE (se cotiza según destino).
+- Retiro de repuestos: en el local, en horario de atención.
 - Medios de pago: PENDIENTE
 - Chapa y pintura (qué trabajos hacen, cómo se presupuesta, demoras típicas): PENDIENTE. Para presupuestar siempre se necesitan fotos del daño y marca, modelo y año del auto.
 - Turnos: los coordina el taller; el bot toma el pedido (fecha y horario preferidos) y alguien del equipo lo confirma.
-- Retiros de repuestos: PENDIENTE (dónde y en qué horario se retira; si hacen envíos).
 `;
+
+// Lun a vie de 9 a 17, hora de Argentina. Fuera de horario el bot contesta igual, pero lo que
+// necesita una persona se confirma el próximo día hábil.
+function enHorario(ahora: Date) {
+  const ar = new Date(ahora.toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }));
+  const dia = ar.getDay();
+  const hora = ar.getHours();
+  return dia >= 1 && dia <= 5 && hora >= 9 && hora < 17;
+}
 
 export function promptSistema(ahora: Date) {
   const fecha = ahora.toLocaleString("es-AR", {
@@ -34,7 +44,15 @@ CÓMO ESCRIBÍS
 
 DATOS DEL TALLER
 ${FICHA_TALLER}
-Hoy es ${fecha} (hora de Argentina).
+Hoy es ${fecha} (hora de Argentina). ${
+    enHorario(ahora)
+      ? "El local está abierto."
+      : "El local está cerrado: si algo lo tiene que confirmar una persona, aclarale que se lo confirman el próximo día hábil desde las 9."
+  }
+
+PRIMER MENSAJE
+- Si es el primer mensaje del cliente, saludá corto y respondé a lo que pregunta. No le tires de entrada horarios, dirección ni envíos: decilo cuando venga al caso.
+- Para buscar un repuesto lo que más sirve es marca, modelo y año del auto, y si tiene, una foto de la pieza. Pedilo solo si falta.
 
 REPUESTOS
 - Para cualquier consulta de repuestos usá la herramienta buscar_repuestos ANTES de responder. Nunca digas que hay o no hay algo sin buscar.
