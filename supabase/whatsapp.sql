@@ -15,7 +15,7 @@ create table if not exists public.wa_chats (
 create table if not exists public.wa_mensajes (
   id          text primary key,             -- id del mensaje de WhatsApp
   jid         text not null references public.wa_chats (jid) on delete cascade,
-  rol         text not null check (rol in ('cliente', 'bot', 'humano')),
+  rol         text not null check (rol in ('cliente', 'bot', 'humano', 'aviso')), -- aviso: al equipo, fuera de la memoria
   texto       text,
   media       jsonb,                        -- {mime, data base64} de audios/fotos recientes
   created_at  timestamptz not null default now()

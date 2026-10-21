@@ -121,8 +121,9 @@ async function procesar(e: Entrada) {
 
   const { data: filas } = await db()
     .from("wa_mensajes")
-    .select("id, rol, texto, media")
+    .select("id, rol, texto, media, created_at")
     .eq("jid", e.jid)
+    .neq("rol", "aviso")
     .order("created_at", { ascending: false })
     .limit(HISTORIAL);
   const historial = (filas ?? []).reverse();
@@ -130,10 +131,15 @@ async function procesar(e: Entrada) {
   const destino = e.telefono ?? e.jid;
   const sinLeer = [];
   for (let i = historial.length - 1; i >= 0 && historial[i].rol === "cliente"; i--) sinLeer.push(historial[i].id);
+  // Para saludar (o no) como una persona: no es lo mismo seguir la charla que retomarla días después.
+  const anterior = historial.at(-1 - sinLeer.length);
+  const nota = anterior
+    ? `El último mensaje antes de este fue hace ${hace(Date.now() - new Date(anterior.created_at).getTime())}.`
+    : "Es la primera vez que escribe este cliente.";
   await dormir(azar(1_000, 3_000));
   await marcarLeido(e.jid, sinLeer);
 
-  const respuesta = await responder(aContenido(historial), {
+  const respuesta = await responder(aContenido(historial), nota, {
     registrarSolicitud: async (s: Solicitud) => {
       await db().from("wa_solicitudes").insert({ jid: e.jid, ...s, nombre: s.nombre ?? estado?.nombre ?? null });
       await avisarEquipo(
@@ -186,19 +192,27 @@ function aContenido(filas: Fila[]): Content[] {
   return contenido;
 }
 
+function hace(ms: number) {
+  const min = Math.round(ms / 60_000);
+  if (min < 60) return `${min} minutos`;
+  const horas = Math.round(min / 60);
+  return horas < 48 ? `${horas} horas` : `${Math.round(horas / 24)} días`;
+}
+
 async function pausar(jid: string) {
   const hasta = new Date(Date.now() + PAUSA_HORAS * 3_600_000).toISOString();
   await db().from("wa_chats").update({ pausado_hasta: hasta }).eq("jid", jid);
 }
 
-// Avisos al equipo desde el mismo WhatsApp del taller. Se guardan como "bot" para no pausar ese chat.
+// Avisos al equipo desde el mismo WhatsApp del taller. Se guardan como "aviso": así su eco no pausa
+// ese chat y quedan fuera de la memoria del bot (tienen datos de otros clientes).
 async function avisarEquipo(texto: string) {
   for (const numero of numeros(process.env.BOT_AVISOS_A)) {
     try {
       const jid = `${numero}@s.whatsapp.net`;
       await db().from("wa_chats").upsert({ jid, telefono: numero });
       const id = await enviarTexto(numero, texto);
-      if (id) await db().from("wa_mensajes").insert({ id, jid, rol: "bot", texto });
+      if (id) await db().from("wa_mensajes").insert({ id, jid, rol: "aviso", texto });
     } catch (err) {
       console.error("aviso al equipo:", err);
     }

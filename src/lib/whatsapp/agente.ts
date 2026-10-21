@@ -88,11 +88,11 @@ async function generar(model: string, contents: Content[], config: GenerateConte
 }
 
 // Corre el agente sobre la conversación y devuelve el texto a mandar (o null si no hay que contestar).
-export async function responder(contents: Content[], acciones: Acciones): Promise<string | null> {
+export async function responder(contents: Content[], nota: string, acciones: Acciones): Promise<string | null> {
   const principal = process.env.GEMINI_MODEL || "gemini-flash-latest";
   const respaldo = process.env.GEMINI_MODEL_RESPALDO || "gemini-flash-lite-latest";
   const config: GenerateContentConfig = {
-    systemInstruction: promptSistema(new Date()),
+    systemInstruction: `${promptSistema(new Date())}\n\nESTA CONVERSACIÓN\n${nota}`,
     tools: [{ functionDeclarations: HERRAMIENTAS }],
     thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
   };
