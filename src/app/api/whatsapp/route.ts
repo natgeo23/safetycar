@@ -1,0 +1,190 @@
+import type { Content, Part } from "@google/genai";
+import { after, NextResponse } from "next/server";
+import { db } from "@/lib/supabase";
+import { responder, type Solicitud } from "@/lib/whatsapp/agente";
+import { enviarTexto, escribiendo, marcarLeido } from "@/lib/whatsapp/evolution";
+
+// El trabajo corre en after(): esperar ráfagas, "leer", "escribir" y la IA entran holgados.
+export const maxDuration = 120;
+
+// Espera a que el cliente termine de mandar mensajes seguidos antes de contestar.
+const RAFAGA_MS = 8_000;
+// Si alguien del taller contesta desde el celular, el bot se calla en ese chat por estas horas.
+const PAUSA_HORAS = 6;
+const HISTORIAL = 30;
+const MEDIA_MAX = 4_000_000; // base64
+
+const dormir = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+const azar = (min: number, max: number) => min + Math.random() * (max - min);
+
+type Clave = { remoteJid?: string; remoteJidAlt?: string; senderPn?: string; fromMe?: boolean; id?: string };
+type Mensaje = Record<string, { caption?: string; text?: string; mimetype?: string } | undefined> & {
+  conversation?: string;
+  base64?: string;
+};
+
+function extraer(m: Mensaje | undefined) {
+  if (!m) return { texto: null, media: null };
+  const texto =
+    m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || m.documentMessage?.caption;
+  const tipo = m.audioMessage ? "audio" : m.imageMessage ? "foto" : m.stickerMessage ? "sticker" : m.videoMessage ? "video" : null;
+  const mime = (m.audioMessage ?? m.imageMessage)?.mimetype?.split(";")[0];
+  const media = mime && m.base64 && m.base64.length < MEDIA_MAX ? { mime, data: m.base64 } : null;
+  return { texto: texto || (tipo ? `[${tipo}]` : null), media };
+}
+
+// Números en formato 5491112345678, separados por coma.
+const numeros = (v?: string) => (v ?? "").split(",").map((n) => n.replace(/\D/g, "")).filter(Boolean);
+
+export async function POST(request: Request) {
+  if (request.headers.get("x-webhook-token") !== process.env.WHATSAPP_WEBHOOK_TOKEN) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
+  const body = await request.json().catch(() => null);
+  if (body?.event !== "messages.upsert") return NextResponse.json({ ok: true });
+
+  const key: Clave = body.data?.key ?? {};
+  const jid = key.remoteJid;
+  if (!jid || !key.id || /@(g\.us|broadcast|newsletter)$/.test(jid)) return NextResponse.json({ ok: true });
+  const { texto, media } = extraer(body.data.message);
+  if (!texto) return NextResponse.json({ ok: true }); // reacciones, ediciones, mensajes de protocolo
+
+  const telefono = [key.remoteJidAlt, key.senderPn, jid].find((j) => j?.endsWith("@s.whatsapp.net"))?.split("@")[0] ?? null;
+  const entrada = { jid, id: key.id, fromMe: !!key.fromMe, telefono, nombre: body.data.pushName as string | undefined, texto, media };
+  after(() => procesar(entrada).catch((e) => console.error("whatsapp:", e)));
+  return NextResponse.json({ ok: true });
+}
+
+type Entrada = {
+  jid: string;
+  id: string;
+  fromMe: boolean;
+  telefono: string | null;
+  nombre?: string;
+  texto: string;
+  media: { mime: string; data: string } | null;
+};
+
+async function procesar(e: Entrada) {
+  const chat: Record<string, string> = { jid: e.jid };
+  if (e.telefono) chat.telefono = e.telefono;
+  if (!e.fromMe && e.nombre) chat.nombre = e.nombre;
+  await db().from("wa_chats").upsert(chat);
+
+  if (e.fromMe) {
+    // Lo que manda el bot también vuelve como fromMe: le damos tiempo a quedar guardado.
+    await dormir(4_000);
+    const { data } = await db().from("wa_mensajes").select("id").eq("id", e.id).maybeSingle();
+    if (data) return;
+    await db().from("wa_mensajes").insert({ id: e.id, jid: e.jid, rol: "humano", texto: e.texto });
+    await pausar(e.jid);
+    return;
+  }
+
+  const { error } = await db().from("wa_mensajes").insert({ id: e.id, jid: e.jid, rol: "cliente", texto: e.texto, media: e.media });
+  if (error) return; // duplicado: Evolution reintentó el webhook
+
+  const modo = process.env.BOT_MODO || "prueba";
+  if (modo === "apagado") return;
+  if (modo === "prueba" && !(e.telefono && numeros(process.env.BOT_NUMEROS_PRUEBA).includes(e.telefono))) return;
+
+  // Solo contesta la invocación del último mensaje de la ráfaga.
+  await dormir(RAFAGA_MS);
+  const { data: ultimo } = await db()
+    .from("wa_mensajes")
+    .select("id")
+    .eq("jid", e.jid)
+    .eq("rol", "cliente")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+  if (ultimo?.id !== e.id) return;
+
+  const { data: estado } = await db().from("wa_chats").select("pausado_hasta, nombre").eq("jid", e.jid).single();
+  if (estado?.pausado_hasta && new Date(estado.pausado_hasta) > new Date()) return;
+
+  const { data: filas } = await db()
+    .from("wa_mensajes")
+    .select("id, rol, texto, media")
+    .eq("jid", e.jid)
+    .order("created_at", { ascending: false })
+    .limit(HISTORIAL);
+  const historial = (filas ?? []).reverse();
+
+  const destino = e.telefono ?? e.jid;
+  const sinLeer = [];
+  for (let i = historial.length - 1; i >= 0 && historial[i].rol === "cliente"; i--) sinLeer.push(historial[i].id);
+  await dormir(azar(1_000, 3_000));
+  await marcarLeido(e.jid, sinLeer);
+
+  const respuesta = await responder(aContenido(historial), {
+    registrarSolicitud: async (s: Solicitud) => {
+      await db().from("wa_solicitudes").insert({ jid: e.jid, ...s, nombre: s.nombre ?? estado?.nombre ?? null });
+      await avisarEquipo(
+        [`📋 Nueva solicitud: ${s.tipo}`, `${s.nombre ?? estado?.nombre ?? ""} · wa.me/${e.telefono ?? ""}`, s.vehiculo, s.fecha_preferida, s.detalle]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    },
+    derivar: async (motivo: string) => {
+      await pausar(e.jid);
+      await avisarEquipo(`🙋 Un cliente necesita que lo atienda alguien\n${estado?.nombre ?? ""} · wa.me/${e.telefono ?? ""}\n${motivo}`);
+    },
+  });
+  if (!respuesta) return;
+
+  // Como en un chat real: varios mensajes cortos, cada uno con su "escribiendo…".
+  const partes = respuesta.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  const mensajes = partes.length > 3 ? [...partes.slice(0, 2), partes.slice(2).join("\n\n")] : partes;
+  for (const texto of mensajes) {
+    await escribiendo(destino, Math.min(Math.max(texto.length * 45, 1_500), 7_000));
+    const id = await enviarTexto(destino, texto);
+    await db().from("wa_mensajes").insert({ id: id ?? `bot-${crypto.randomUUID()}`, jid: e.jid, rol: "bot", texto });
+  }
+
+  // Los audios y fotos solo sirven mientras la charla está fresca.
+  await db()
+    .from("wa_mensajes")
+    .update({ media: null })
+    .eq("jid", e.jid)
+    .not("media", "is", null)
+    .lt("created_at", new Date(Date.now() - 2 * 86_400_000).toISOString());
+}
+
+type Fila = { rol: string; texto: string | null; media: { mime: string; data: string } | null };
+
+// Gemini pide turnos alternados que empiecen y terminen con el usuario.
+function aContenido(filas: Fila[]): Content[] {
+  const contenido: Content[] = [];
+  filas.forEach((f, i) => {
+    const role = f.rol === "cliente" ? "user" : "model";
+    const parts: Part[] = [];
+    if (f.texto) parts.push({ text: f.texto });
+    if (role === "user" && f.media && i >= filas.length - 10) parts.push({ inlineData: { mimeType: f.media.mime, data: f.media.data } });
+    if (!parts.length) return;
+    const previo = contenido.at(-1);
+    if (previo?.role === role) previo.parts!.push(...parts);
+    else contenido.push({ role, parts });
+  });
+  while (contenido[0]?.role === "model") contenido.shift();
+  return contenido;
+}
+
+async function pausar(jid: string) {
+  const hasta = new Date(Date.now() + PAUSA_HORAS * 3_600_000).toISOString();
+  await db().from("wa_chats").update({ pausado_hasta: hasta }).eq("jid", jid);
+}
+
+// Avisos al equipo desde el mismo WhatsApp del taller. Se guardan como "bot" para no pausar ese chat.
+async function avisarEquipo(texto: string) {
+  for (const numero of numeros(process.env.BOT_AVISOS_A)) {
+    try {
+      const jid = `${numero}@s.whatsapp.net`;
+      await db().from("wa_chats").upsert({ jid, telefono: numero });
+      const id = await enviarTexto(numero, texto);
+      if (id) await db().from("wa_mensajes").insert({ id, jid, rol: "bot", texto });
+    } catch (err) {
+      console.error("aviso al equipo:", err);
+    }
+  }
+}
