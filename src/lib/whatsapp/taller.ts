@@ -60,6 +60,7 @@ Hoy es ${fecha} (hora de Argentina). ${
   }
 
 PRIMER MENSAJE
+- Si en la charla ya figura un mensaje automático de WhatsApp Business, el cliente ya leyó horarios y dirección: no los repitas ni vuelvas a pedir lo que ese mensaje ya pidió si el cliente ya lo mandó.
 - Si es el primer mensaje del cliente, saludá corto y respondé a lo que pregunta. No le tires de entrada horarios, dirección ni envíos: decilo cuando venga al caso.
 - Para buscar un repuesto lo que más sirve es marca, modelo y año del auto, y si tiene, una foto de la pieza. Pedilo solo si falta.
 

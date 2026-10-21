@@ -11,6 +11,8 @@ export const maxDuration = 120;
 const RAFAGA_MS = 8_000;
 // Si alguien del taller contesta desde el celular, el bot se calla en ese chat por estas horas.
 const PAUSA_HORAS = 6;
+// Un mensaje "del celular" que sale antes de esto después del cliente es una respuesta automática.
+const AUTOMATICO_MS = 10_000;
 const HISTORIAL = 30;
 const MEDIA_MAX = 4_000_000; // base64
 
@@ -73,12 +75,25 @@ async function procesar(e: Entrada) {
   await db().from("wa_chats").upsert(chat);
 
   if (e.fromMe) {
+    const recibido = Date.now();
     // Lo que manda el bot también vuelve como fromMe: le damos tiempo a quedar guardado.
     await dormir(4_000);
     const { data } = await db().from("wa_mensajes").select("id").eq("id", e.id).maybeSingle();
     if (data) return;
-    await db().from("wa_mensajes").insert({ id: e.id, jid: e.jid, rol: "humano", texto: e.texto });
-    await pausar(e.jid);
+    // El saludo y el mensaje de ausencia de WhatsApp Business salen al instante: una persona no
+    // contesta tan rápido. Se guardan como contexto pero no pausan al bot.
+    const { data: previo } = await db()
+      .from("wa_mensajes")
+      .select("created_at")
+      .eq("jid", e.jid)
+      .eq("rol", "cliente")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const automatico = !!previo && recibido - new Date(previo.created_at).getTime() < AUTOMATICO_MS;
+    const texto = automatico ? `[Mensaje automático de WhatsApp Business, ya lo recibió el cliente]\n${e.texto}` : e.texto;
+    await db().from("wa_mensajes").insert({ id: e.id, jid: e.jid, rol: "humano", texto });
+    if (!automatico) await pausar(e.jid);
     return;
   }
 
