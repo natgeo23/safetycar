@@ -61,7 +61,7 @@ const HERRAMIENTAS: FunctionDeclaration[] = [
   },
   {
     name: "derivar_a_persona",
-    description: "Pasa la conversación a alguien del equipo. El bot deja de responder en este chat por unas horas.",
+    description: "Le pasa la consulta a los chicos de ventas y les avisa. Vos seguís atendiendo el chat hasta que alguno de ellos escriba.",
     parametersJsonSchema: {
       type: "object",
       properties: { motivo: { type: "string" } },
@@ -219,7 +219,7 @@ export async function responder(contents: Content[], nota: string, acciones: Acc
           resultado = { ok: true, aviso: "Registrado. Los chicos de ventas lo confirman por este chat." };
         } else if (f.name === "derivar_a_persona") {
           await acciones.derivar(args.motivo ?? "");
-          resultado = { ok: true, aviso: "Ya se avisó a los chicos de ventas, que siguen la charla. Contale al cliente qué sigue." };
+          resultado = { ok: true, aviso: "Ya se avisó a los chicos de ventas. Contale al cliente qué sigue y seguí disponible para lo que necesite." };
         } else {
           resultado = { error: "herramienta desconocida" };
         }

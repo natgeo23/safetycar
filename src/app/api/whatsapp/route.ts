@@ -12,7 +12,7 @@ export const maxDuration = 120;
 const RAFAGA_MS = 3_000;
 // Cuánto tarda como mínimo el primer mensaje desde que "lee" (si la IA tarda más, no se suma nada).
 const PRIMERA_RESPUESTA_MS = 3_500;
-// Si alguien del taller contesta desde el celular, el bot se calla en ese chat por estas horas.
+// Si alguien de ventas contesta desde el WhatsApp del local, el bot se calla en ese chat por estas horas.
 const PAUSA_HORAS = 6;
 // Un mensaje "del celular" que sale antes de esto después del cliente es una respuesta automática.
 const AUTOMATICO_MS = 10_000;
@@ -145,6 +145,16 @@ async function procesar(e: Entrada) {
   for (let i = historial.length - 1; i >= 0 && historial[i].rol === "cliente"; i--) sinLeer.push(historial[i].id);
   // Para saludar (o no) como una persona: no es lo mismo seguir la charla que retomarla días después.
   const anterior = historial.at(-1 - sinLeer.length);
+  const { data: abierta } = await db()
+    .from("wa_solicitudes")
+    .select("detalle, tomada_por, created_at")
+    .eq("jid", e.jid)
+    .eq("tipo", "consulta")
+    .eq("estado", "pendiente")
+    .gte("created_at", new Date(Date.now() - 12 * 3_600_000).toISOString())
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
   const nota = [
     anterior
       ? `El último mensaje antes de este fue hace ${hace(Date.now() - new Date(anterior.created_at).getTime())}.`
@@ -152,7 +162,14 @@ async function procesar(e: Entrada) {
     nombre
       ? `El cliente se llama ${nombre}.`
       : `Todavía no sabés cómo se llama el cliente (su perfil de WhatsApp dice "${estado?.nombre ?? "sin nombre"}", que puede no ser su nombre real).`,
-  ].join("\n");
+    abierta
+      ? `Hace ${hace(Date.now() - new Date(abierta.created_at).getTime())} ya le pasaste a los chicos de ventas esta consulta: "${abierta.detalle}". ${
+          abierta.tomada_por ? `La tomó ${abierta.tomada_por}.` : "Todavía no la tomó nadie."
+        }`
+      : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
   // Lee y empieza a "escribir" mientras la IA piensa, como alguien que contesta enseguida.
   await dormir(azar(300, 900));
   await marcarLeido(e.jid, sinLeer);
@@ -171,8 +188,8 @@ async function procesar(e: Entrada) {
     registrarSolicitud: async (s: Solicitud) => {
       enSegundoPlano(crearCaso({ ...caso, ...s, nombre: s.nombre ?? nombre ?? estado?.nombre ?? null }));
     },
+    // Derivar no pausa: Stefy sigue atendiendo hasta que alguien de ventas escriba desde el local.
     derivar: async (motivo: string) => {
-      await pausar(e.jid);
       enSegundoPlano(crearCaso({ ...caso, tipo: "consulta", nombre: nombre ?? estado?.nombre ?? null, detalle: motivo }));
     },
   };
