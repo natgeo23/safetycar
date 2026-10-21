@@ -10,6 +10,7 @@ const VUELTAS = 6;
 
 // Lo que el agente puede hacer además de hablar. El handler de la ruta implementa los efectos.
 export type Acciones = {
+  guardarNombre: (nombre: string) => Promise<void>;
   registrarSolicitud: (s: Solicitud) => Promise<void>;
   derivar: (motivo: string) => Promise<void>;
 };
@@ -22,6 +23,15 @@ export type Solicitud = {
 };
 
 const HERRAMIENTAS: FunctionDeclaration[] = [
+  {
+    name: "guardar_nombre",
+    description: "Guarda cómo se llama el cliente para recordarlo en próximas charlas. Usala apenas te diga su nombre.",
+    parametersJsonSchema: {
+      type: "object",
+      properties: { nombre: { type: "string", description: "Nombre de pila como lo dijo el cliente" } },
+      required: ["nombre"],
+    },
+  },
   {
     name: "buscar_repuestos",
     description: "Busca en el stock del taller. Devuelve hasta 10 repuestos con stock, estado y precio.",
@@ -157,7 +167,10 @@ export async function responder(contents: Content[], nota: string, acciones: Acc
       const args = (f.args ?? {}) as Record<string, string>;
       let resultado: Record<string, unknown>;
       try {
-        if (f.name === "buscar_repuestos") {
+        if (f.name === "guardar_nombre") {
+          await acciones.guardarNombre(args.nombre ?? "");
+          resultado = { ok: true };
+        } else if (f.name === "buscar_repuestos") {
           resultado = { repuestos: await buscarRepuestos(args.consulta ?? "") };
         } else if (f.name === "registrar_solicitud") {
           await acciones.registrarSolicitud(args as unknown as Solicitud);

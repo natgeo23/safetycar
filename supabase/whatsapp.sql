@@ -6,6 +6,7 @@ create table if not exists public.wa_chats (
   jid            text primary key,          -- remoteJid de WhatsApp (…@s.whatsapp.net o …@lid)
   telefono       text,                      -- número sin "+" si se conoce
   nombre         text,                      -- nombre de perfil de WhatsApp
+  nombre_cliente text,                      -- cómo dijo que se llama (lo guarda el bot)
   pausado_hasta  timestamptz,               -- el bot no contesta hasta esta hora (atiende una persona)
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()

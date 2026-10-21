@@ -116,8 +116,9 @@ async function procesar(e: Entrada) {
     .single();
   if (ultimo?.id !== e.id) return;
 
-  const { data: estado } = await db().from("wa_chats").select("pausado_hasta, nombre").eq("jid", e.jid).single();
+  const { data: estado } = await db().from("wa_chats").select("pausado_hasta, nombre, nombre_cliente").eq("jid", e.jid).single();
   if (estado?.pausado_hasta && new Date(estado.pausado_hasta) > new Date()) return;
+  let nombre: string | null = estado?.nombre_cliente ?? null;
 
   const { data: filas } = await db()
     .from("wa_mensajes")
@@ -133,24 +134,32 @@ async function procesar(e: Entrada) {
   for (let i = historial.length - 1; i >= 0 && historial[i].rol === "cliente"; i--) sinLeer.push(historial[i].id);
   // Para saludar (o no) como una persona: no es lo mismo seguir la charla que retomarla días después.
   const anterior = historial.at(-1 - sinLeer.length);
-  const nota = anterior
-    ? `El último mensaje antes de este fue hace ${hace(Date.now() - new Date(anterior.created_at).getTime())}.`
-    : "Es la primera vez que escribe este cliente.";
+  const nota = [
+    anterior
+      ? `El último mensaje antes de este fue hace ${hace(Date.now() - new Date(anterior.created_at).getTime())}.`
+      : "Es la primera vez que escribe este cliente.",
+    nombre
+      ? `El cliente se llama ${nombre}.`
+      : `Todavía no sabés cómo se llama el cliente (su perfil de WhatsApp dice "${estado?.nombre ?? "sin nombre"}", que puede no ser su nombre real).`,
+  ].join("\n");
   await dormir(azar(1_000, 3_000));
   await marcarLeido(e.jid, sinLeer);
 
+  const quien = () => `${nombre ?? estado?.nombre ?? "Cliente"} · wa.me/${e.telefono ?? ""}`;
   const acciones = {
+    guardarNombre: async (n: string) => {
+      nombre = n.trim().slice(0, 60) || nombre;
+      await db().from("wa_chats").update({ nombre_cliente: nombre }).eq("jid", e.jid);
+    },
     registrarSolicitud: async (s: Solicitud) => {
-      await db().from("wa_solicitudes").insert({ jid: e.jid, ...s, nombre: s.nombre ?? estado?.nombre ?? null });
+      await db().from("wa_solicitudes").insert({ jid: e.jid, ...s, nombre: s.nombre ?? nombre ?? estado?.nombre ?? null });
       await avisarEquipo(
-        [`📋 Nueva solicitud: ${s.tipo}`, `${s.nombre ?? estado?.nombre ?? ""} · wa.me/${e.telefono ?? ""}`, s.vehiculo, s.fecha_preferida, s.detalle]
-          .filter(Boolean)
-          .join("\n"),
+        [`📋 Nueva solicitud: ${s.tipo}`, quien(), s.vehiculo, s.fecha_preferida, s.detalle].filter(Boolean).join("\n"),
       );
     },
     derivar: async (motivo: string) => {
       await pausar(e.jid);
-      await avisarEquipo(`🙋 Un cliente necesita que lo atienda alguien\n${estado?.nombre ?? ""} · wa.me/${e.telefono ?? ""}\n${motivo}`);
+      await avisarEquipo(`🙋 Un cliente necesita que lo atienda alguien\n${quien()}\n${motivo}`);
     },
   };
   // El cliente nunca se queda sin respuesta: si la IA falla, contesta algo humano y avisa al equipo.
