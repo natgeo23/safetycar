@@ -15,7 +15,7 @@ export type Acciones = {
   derivar: (motivo: string) => Promise<void>;
 };
 export type Solicitud = {
-  tipo: "turno" | "retiro" | "presupuesto" | "reserva_repuesto" | "otro";
+  tipo: "retiro" | "reserva_repuesto" | "otro";
   nombre?: string;
   vehiculo?: string;
   fecha_preferida?: string;
@@ -34,7 +34,7 @@ const HERRAMIENTAS: FunctionDeclaration[] = [
   },
   {
     name: "buscar_repuestos",
-    description: "Busca en el stock del taller. Devuelve hasta 10 repuestos con stock, estado y precio.",
+    description: "Busca en el stock del local. Devuelve hasta 10 repuestos con stock, estado y precio.",
     parametersJsonSchema: {
       type: "object",
       properties: {
@@ -45,15 +45,15 @@ const HERRAMIENTAS: FunctionDeclaration[] = [
   },
   {
     name: "registrar_solicitud",
-    description: "Registra un pedido de turno, retiro, presupuesto o reserva para que el taller lo confirme y avisa al equipo.",
+    description: "Registra un pedido de retiro, envío o reserva de un repuesto para que los chicos de ventas lo confirmen, y les avisa.",
     parametersJsonSchema: {
       type: "object",
       properties: {
-        tipo: { type: "string", enum: ["turno", "retiro", "presupuesto", "reserva_repuesto", "otro"] },
+        tipo: { type: "string", enum: ["retiro", "reserva_repuesto", "otro"], description: "otro: envíos y cualquier otro pedido" },
         nombre: { type: "string" },
         vehiculo: { type: "string", description: "Marca, modelo y año" },
-        fecha_preferida: { type: "string", description: "Cuándo le queda bien al cliente, en sus palabras" },
-        detalle: { type: "string", description: "Qué necesita, incluyendo repuesto o trabajo" },
+        fecha_preferida: { type: "string", description: "Cuándo pasa a retirar, en sus palabras" },
+        detalle: { type: "string", description: "Qué repuesto y qué necesita (para envíos, localidad de destino)" },
       },
       required: ["tipo", "detalle"],
     },
