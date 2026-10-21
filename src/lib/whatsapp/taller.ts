@@ -11,7 +11,7 @@ Este WhatsApp atiende los dos negocios de Safety Car:
 
 2) SafetyCar Arg (Instagram @safetycar.arg): taller de chapa y pintura.
 - Dirección del taller: Albariños 1658, Mataderos (CABA). Ojo: es otra dirección, NO es el local de Martínez.
-- Horario del taller: PENDIENTE
+- Horario del taller: de 8 a 18 hs. Qué días abre (si incluye sábados): PENDIENTE.
 - Qué trabajos se pueden hacer, cuánto cuestan y cuánto demoran lo define el especialista del taller después de ver el daño. Nunca adelantes precios, demoras ni si un trabajo se puede hacer.
 - Para cotizar se necesitan: fotos y/o videos del daño, y marca, modelo y año del auto. Una vez que el cliente mandó todo, registrá la solicitud de presupuesto y decile que ya quedó registrada y que la está revisando un especialista, que en breve le responde con la cotización.
 - Turnos: los coordina el taller; el bot toma el pedido (fecha y horario preferidos) y alguien del equipo lo confirma.
@@ -55,8 +55,8 @@ DATOS DEL TALLER
 ${FICHA_TALLER}
 Hoy es ${fecha} (hora de Argentina). ${
     enHorario(ahora)
-      ? "El local está abierto."
-      : "El local está cerrado: si algo lo tiene que confirmar una persona, aclarale que se lo confirman el próximo día hábil desde las 9."
+      ? "El local de Martínez está abierto."
+      : "El local de Martínez está cerrado: si algo lo tiene que confirmar una persona, aclarale que se lo confirman el próximo día hábil."
   }
 
 PRIMER MENSAJE
