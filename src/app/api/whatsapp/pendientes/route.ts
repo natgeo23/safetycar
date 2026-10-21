@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
     .from("wa_solicitudes")
     .select("id, jid, tipo, nombre, vehiculo, detalle, created_at")
     .is("tomada_por", null)
+    .eq("estado", "pendiente")
     .lt("created_at", new Date(Date.now() - GRACIA_MIN * 60_000).toISOString())
     .gte("created_at", new Date(Date.now() - VENTANA_DIAS * 86_400_000).toISOString())
     .order("created_at");

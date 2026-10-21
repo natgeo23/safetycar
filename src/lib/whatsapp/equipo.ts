@@ -49,8 +49,32 @@ const TITULOS: Record<Caso["tipo"], string> = {
   otro: "📋 Pedido",
 };
 
+// Una consulta del mismo cliente en estas horas se considera la misma: no se vuelve a avisar.
+const MISMA_CONSULTA_HORAS = 12;
+
 // Registra el caso y avisa a todo el equipo con un número para que alguien lo tome.
 export async function crearCaso(c: Caso) {
+  if (c.tipo === "consulta") {
+    const { data: abierta } = await db()
+      .from("wa_solicitudes")
+      .select("id, nombre, tomada_por")
+      .eq("jid", c.jid)
+      .eq("tipo", "consulta")
+      .eq("estado", "pendiente")
+      .gte("created_at", new Date(Date.now() - MISMA_CONSULTA_HORAS * 3_600_000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (abierta) {
+      const nombre = c.nombre ?? abierta.nombre;
+      await db().from("wa_solicitudes").update({ nombre, detalle: c.detalle }).eq("id", abierta.id);
+      // Si ya la tomó alguien, le llega la novedad solo a esa persona; si no, la cubre el recordatorio.
+      const vendedor = equipo().find((v) => v.nombre === abierta.tomada_por);
+      if (vendedor) await avisar(vendedor.numero, `ℹ️ Novedad en la #${abierta.id} (${nombre ?? "cliente"}):\n${c.detalle}`);
+      return abierta.id as number;
+    }
+  }
+
   const { data, error } = await db()
     .from("wa_solicitudes")
     .insert({
