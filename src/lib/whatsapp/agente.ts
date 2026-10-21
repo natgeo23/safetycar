@@ -174,10 +174,10 @@ export async function responder(contents: Content[], nota: string, acciones: Acc
           resultado = { repuestos: await buscarRepuestos(args.consulta ?? "") };
         } else if (f.name === "registrar_solicitud") {
           await acciones.registrarSolicitud(args as unknown as Solicitud);
-          resultado = { ok: true, aviso: "Registrado. El equipo lo confirma por este chat." };
+          resultado = { ok: true, aviso: "Registrado. Los chicos de ventas lo confirman por este chat." };
         } else if (f.name === "derivar_a_persona") {
           await acciones.derivar(args.motivo ?? "");
-          resultado = { ok: true, aviso: "Ya se avisó al equipo. Despedite brevemente: alguien sigue la charla." };
+          resultado = { ok: true, aviso: "Ya se avisó a los chicos de ventas, que siguen la charla. Contale al cliente qué sigue." };
         } else {
           resultado = { error: "herramienta desconocida" };
         }
