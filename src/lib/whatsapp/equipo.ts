@@ -117,8 +117,10 @@ export async function reenviarMedia(jid: string, numero: string, titulo: string,
   let query = db().from("wa_mensajes").select("id, texto").eq("jid", jid).eq("rol", "cliente").not("media", "is", null);
   if (filtro.ids) query = query.in("id", filtro.ids);
   if (filtro.desde) query = query.gte("created_at", filtro.desde.toISOString());
-  const { data: filas } = await query.order("created_at").limit(MEDIA_MAX_REENVIO);
-  if (!filas?.length) return 0;
+  // Los más recientes, pero se mandan en el orden en que los envió el cliente.
+  const { data: recientes } = await query.order("created_at", { ascending: false }).limit(MEDIA_MAX_REENVIO);
+  const filas = (recientes ?? []).reverse();
+  if (!filas.length) return 0;
 
   await avisar(numero, titulo);
   const destinoJid = `${numero}@s.whatsapp.net`;
@@ -167,7 +169,7 @@ export async function mensajeDelEquipo(v: Vendedor, texto: string, citado: strin
   if (!citado && !quiere) return false;
   const numero = quiere ? texto.match(/#?\b(\d{1,6})\b/)?.[1] : undefined;
 
-  let query = db().from("wa_solicitudes").select("id, nombre, tomada_por, jid");
+  let query = db().from("wa_solicitudes").select("id, nombre, tomada_por, jid, created_at");
   if (citado) query = query.contains("aviso_ids", [citado]);
   else if (numero) query = query.eq("id", Number(numero));
   else {
@@ -193,7 +195,9 @@ export async function mensajeDelEquipo(v: Vendedor, texto: string, citado: strin
 
   const caso = casos[0];
   const cliente = caso.nombre ?? "el cliente";
-  const ultimoDia = { desde: new Date(Date.now() - 86_400_000) };
+  // Lo de esta consulta: desde 24 h antes de que se creara (las fotos suelen llegar antes de
+  // derivar) hasta ahora, aunque la tomen al día siguiente. Lo anterior es de otras charlas.
+  const ultimoDia = { desde: new Date(new Date(caso.created_at).getTime() - 86_400_000) };
   if (caso.tomada_por === v.nombre) {
     // Pedirla de nuevo sirve para que le vuelvan a llegar las fotos.
     await avisar(v.numero, `Ya es tuya la #${caso.id} 👍`);

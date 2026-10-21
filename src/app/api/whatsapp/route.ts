@@ -222,13 +222,18 @@ async function procesar(e: Entrada) {
   console.log(`respuesta en ${Date.now() - inicio} ms desde que leyó (${mensajes.length} mensajes)`);
   await Promise.all(tareas);
 
-  // Los audios y fotos solo sirven mientras la charla está fresca.
-  await db()
+  // El contenido de audios y fotos solo le sirve a la IA mientras la charla está fresca: después se
+  // borra, pero queda la marca de que había un archivo para poder reenviarlo a ventas.
+  const { data: viejos } = await db()
     .from("wa_mensajes")
-    .update({ media: null })
+    .select("id, media")
     .eq("jid", e.jid)
-    .not("media", "is", null)
-    .lt("created_at", new Date(Date.now() - 2 * 86_400_000).toISOString());
+    .not("media->>data", "is", null)
+    .lt("created_at", new Date(Date.now() - 2 * 86_400_000).toISOString())
+    .limit(50);
+  for (const v of viejos ?? []) {
+    await db().from("wa_mensajes").update({ media: { mime: v.media.mime, data: null } }).eq("id", v.id);
+  }
 }
 
 type Fila = { rol: string; texto: string | null; media: { mime: string; data: string | null } | null };
