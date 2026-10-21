@@ -2,6 +2,7 @@ import type { Content, Part } from "@google/genai";
 import { after, NextResponse } from "next/server";
 import { db } from "@/lib/supabase";
 import { responder, type Solicitud } from "@/lib/whatsapp/agente";
+import { crearCaso, equipo, mensajeDelEquipo } from "@/lib/whatsapp/equipo";
 import { enviarTexto, escribiendo, marcarLeido } from "@/lib/whatsapp/evolution";
 
 // El trabajo corre en after(): esperar ráfagas, "leer", "escribir" y la IA entran holgados.
@@ -53,7 +54,10 @@ export async function POST(request: Request) {
   if (!texto) return NextResponse.json({ ok: true }); // reacciones, ediciones, mensajes de protocolo
 
   const telefono = [key.remoteJidAlt, key.senderPn, jid].find((j) => j?.endsWith("@s.whatsapp.net"))?.split("@")[0] ?? null;
-  const entrada = { jid, id: key.id, fromMe: !!key.fromMe, telefono, nombre: body.data.pushName as string | undefined, texto, media };
+  // Si responde citando un mensaje (ej. un aviso al equipo), el id del citado.
+  const citado: string | null =
+    body.data.contextInfo?.stanzaId ?? body.data.message?.extendedTextMessage?.contextInfo?.stanzaId ?? null;
+  const entrada = { jid, id: key.id, fromMe: !!key.fromMe, telefono, nombre: body.data.pushName as string | undefined, texto, media, citado };
   after(() => procesar(entrada).catch((e) => console.error("whatsapp:", e)));
   return NextResponse.json({ ok: true });
 }
@@ -66,6 +70,7 @@ type Entrada = {
   nombre?: string;
   texto: string;
   media: { mime: string; data: string } | null;
+  citado: string | null;
 };
 
 async function procesar(e: Entrada) {
@@ -96,6 +101,10 @@ async function procesar(e: Entrada) {
     if (!automatico) await pausar(e.jid);
     return;
   }
+
+  // Alguien de ventas tomando una consulta desde su celular: no es un cliente.
+  const vendedor = equipo().find((v) => v.numero === e.telefono);
+  if (vendedor && (await mensajeDelEquipo(vendedor, e.texto, e.citado))) return;
 
   const { error } = await db().from("wa_mensajes").insert({ id: e.id, jid: e.jid, rol: "cliente", texto: e.texto, media: e.media });
   if (error) return; // duplicado: Evolution reintentó el webhook
@@ -145,21 +154,18 @@ async function procesar(e: Entrada) {
   await dormir(azar(1_000, 3_000));
   await marcarLeido(e.jid, sinLeer);
 
-  const quien = () => `${nombre ?? estado?.nombre ?? "Cliente"} · wa.me/${e.telefono ?? ""}`;
+  const caso = { jid: e.jid, telefono: e.telefono };
   const acciones = {
     guardarNombre: async (n: string) => {
       nombre = n.trim().slice(0, 60) || nombre;
       await db().from("wa_chats").update({ nombre_cliente: nombre }).eq("jid", e.jid);
     },
     registrarSolicitud: async (s: Solicitud) => {
-      await db().from("wa_solicitudes").insert({ jid: e.jid, ...s, nombre: s.nombre ?? nombre ?? estado?.nombre ?? null });
-      await avisarEquipo(
-        [`📋 Nueva solicitud: ${s.tipo}`, quien(), s.vehiculo, s.fecha_preferida, s.detalle].filter(Boolean).join("\n"),
-      );
+      await crearCaso({ ...caso, ...s, nombre: s.nombre ?? nombre ?? estado?.nombre ?? null });
     },
     derivar: async (motivo: string) => {
       await pausar(e.jid);
-      await avisarEquipo(`🙋 Un cliente necesita que lo atienda alguien\n${quien()}\n${motivo}`);
+      await crearCaso({ ...caso, tipo: "consulta", nombre: nombre ?? estado?.nombre ?? null, detalle: motivo });
     },
   };
   // El cliente nunca se queda sin respuesta: si la IA falla, contesta algo humano y avisa al equipo.
@@ -219,19 +225,4 @@ function hace(ms: number) {
 async function pausar(jid: string) {
   const hasta = new Date(Date.now() + PAUSA_HORAS * 3_600_000).toISOString();
   await db().from("wa_chats").update({ pausado_hasta: hasta }).eq("jid", jid);
-}
-
-// Avisos al equipo desde el mismo WhatsApp del taller. Se guardan como "aviso": así su eco no pausa
-// ese chat y quedan fuera de la memoria del bot (tienen datos de otros clientes).
-async function avisarEquipo(texto: string) {
-  for (const numero of numeros(process.env.BOT_AVISOS_A)) {
-    try {
-      const jid = `${numero}@s.whatsapp.net`;
-      await db().from("wa_chats").upsert({ jid, telefono: numero });
-      const id = await enviarTexto(numero, texto);
-      if (id) await db().from("wa_mensajes").insert({ id, jid, rol: "aviso", texto });
-    } catch (err) {
-      console.error("aviso al equipo:", err);
-    }
-  }
 }

@@ -28,12 +28,15 @@ create table if not exists public.wa_solicitudes (
   id               bigint generated always as identity primary key,
   created_at       timestamptz not null default now(),
   jid              text not null references public.wa_chats (jid) on delete cascade,
-  tipo             text not null check (tipo in ('turno', 'retiro', 'presupuesto', 'reserva_repuesto', 'otro')),
+  tipo             text not null check (tipo in ('consulta', 'turno', 'retiro', 'presupuesto', 'reserva_repuesto', 'otro')),
   nombre           text,
   vehiculo         text,
   fecha_preferida  text,
   detalle          text,
-  estado           text not null default 'pendiente' check (estado in ('pendiente', 'confirmada', 'cancelada', 'hecha'))
+  estado           text not null default 'pendiente' check (estado in ('pendiente', 'confirmada', 'cancelada', 'hecha')),
+  tomada_por       text,                    -- quién de ventas la tomó (respondiendo el aviso)
+  tomada_at        timestamptz,
+  aviso_ids        text[] not null default '{}' -- ids de los avisos, para tomarla citándolos
 );
 create index if not exists wa_solicitudes_estado_idx on public.wa_solicitudes (estado, created_at desc);
 
