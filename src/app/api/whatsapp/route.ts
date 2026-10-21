@@ -9,7 +9,9 @@ import { enviarTexto, escribiendo, marcarLeido } from "@/lib/whatsapp/evolution"
 export const maxDuration = 120;
 
 // Espera a que el cliente termine de mandar mensajes seguidos antes de contestar.
-const RAFAGA_MS = 8_000;
+const RAFAGA_MS = 3_000;
+// Cuánto tarda como mínimo el primer mensaje desde que "lee" (si la IA tarda más, no se suma nada).
+const PRIMERA_RESPUESTA_MS = 3_500;
 // Si alguien del taller contesta desde el celular, el bot se calla en ese chat por estas horas.
 const PAUSA_HORAS = 6;
 // Un mensaje "del celular" que sale antes de esto después del cliente es una respuesta automática.
@@ -151,8 +153,14 @@ async function procesar(e: Entrada) {
       ? `El cliente se llama ${nombre}.`
       : `Todavía no sabés cómo se llama el cliente (su perfil de WhatsApp dice "${estado?.nombre ?? "sin nombre"}", que puede no ser su nombre real).`,
   ].join("\n");
-  await dormir(azar(1_000, 3_000));
+  // Lee y empieza a "escribir" mientras la IA piensa, como alguien que contesta enseguida.
+  await dormir(azar(300, 900));
   await marcarLeido(e.jid, sinLeer);
+  void escribiendo(destino, 15_000);
+  const inicio = Date.now();
+  // Los avisos al equipo salen después de contestarle al cliente, para no demorarlo.
+  const tareas: Promise<unknown>[] = [];
+  const enSegundoPlano = (p: Promise<unknown>) => tareas.push(p.catch((err) => console.error("aviso:", err)));
 
   const caso = { jid: e.jid, telefono: e.telefono };
   const acciones = {
@@ -161,11 +169,11 @@ async function procesar(e: Entrada) {
       await db().from("wa_chats").update({ nombre_cliente: nombre }).eq("jid", e.jid);
     },
     registrarSolicitud: async (s: Solicitud) => {
-      await crearCaso({ ...caso, ...s, nombre: s.nombre ?? nombre ?? estado?.nombre ?? null });
+      enSegundoPlano(crearCaso({ ...caso, ...s, nombre: s.nombre ?? nombre ?? estado?.nombre ?? null }));
     },
     derivar: async (motivo: string) => {
       await pausar(e.jid);
-      await crearCaso({ ...caso, tipo: "consulta", nombre: nombre ?? estado?.nombre ?? null, detalle: motivo });
+      enSegundoPlano(crearCaso({ ...caso, tipo: "consulta", nombre: nombre ?? estado?.nombre ?? null, detalle: motivo }));
     },
   };
   // El cliente nunca se queda sin respuesta: si la IA falla, contesta algo humano y avisa al equipo.
@@ -181,11 +189,18 @@ async function procesar(e: Entrada) {
   // Como en un chat real: varios mensajes cortos, cada uno con su "escribiendo…".
   const partes = respuesta.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
   const mensajes = partes.length > 3 ? [...partes.slice(0, 2), partes.slice(2).join("\n\n")] : partes;
-  for (const texto of mensajes) {
-    await escribiendo(destino, Math.min(Math.max(texto.length * 45, 1_500), 7_000));
+  for (const [i, texto] of mensajes.entries()) {
+    if (i === 0) {
+      // Ya estuvo "escribiendo" mientras pensaba: solo completa el mínimo si la IA fue muy rápida.
+      await dormir(Math.max(PRIMERA_RESPUESTA_MS - (Date.now() - inicio), 0));
+    } else {
+      await escribiendo(destino, Math.min(Math.max(texto.length * 25, 1_000), 3_000));
+    }
     const id = await enviarTexto(destino, texto);
     await db().from("wa_mensajes").insert({ id: id ?? `bot-${crypto.randomUUID()}`, jid: e.jid, rol: "bot", texto });
   }
+  console.log(`respuesta en ${Date.now() - inicio} ms desde que leyó (${mensajes.length} mensajes)`);
+  await Promise.all(tareas);
 
   // Los audios y fotos solo sirven mientras la charla está fresca.
   await db()

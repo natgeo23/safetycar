@@ -136,7 +136,7 @@ function variantes(palabra: string) {
 
 // Gemini Flash seguido devuelve 503 "high demand" y a veces el respaldo se cuelga: se corre una
 // carrera entre los dos y, si ambos fallan, se reintenta una vez antes de rendirse.
-const LANZAR_RESPALDO_MS = 5_000;
+const LANZAR_RESPALDO_MS = 3_000;
 const TIMEOUT_MS = 18_000;
 const INTENTOS = 2;
 
