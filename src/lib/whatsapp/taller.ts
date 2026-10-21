@@ -1,18 +1,27 @@
-// Datos del taller que el bot puede dar. Todo lo marcado PENDIENTE el bot NO lo inventa:
+// Datos de los dos negocios que el bot puede dar. Todo lo marcado PENDIENTE el bot NO lo inventa:
 // dice que lo consulta y deriva. Completar con datos reales y redeployar.
 export const FICHA_TALLER = `
-- Nombre: Safety Car (Instagram: @safetycar.arg para el taller y @safetycar.autopartes para repuestos).
-- Rubros: venta de autopartes nuevas y usadas, y taller de chapa y pintura.
-- Dirección: Av. Fleming 2313, Martínez (San Isidro). Es el único local, no hay sucursales.
-- Horarios de atención: lunes a viernes de 9 a 17 hs. Sábados, domingos y feriados cerrado.
-- Envíos: a todo el país. Costo y demora del envío: PENDIENTE (se cotiza según destino).
-- Retiro de repuestos: en el local, en horario de atención.
-- Medios de pago: PENDIENTE
-- Chapa y pintura (qué trabajos hacen, cómo se presupuesta, demoras típicas): PENDIENTE. Para presupuestar siempre se necesitan fotos del daño y marca, modelo y año del auto.
+Este WhatsApp atiende los dos negocios de Safety Car:
+
+1) SafetyCar Autopartes (Instagram @safetycar.autopartes): venta de repuestos nuevos y usados.
+- Local: Av. Fleming 2313, Martínez (San Isidro). Es el único local de venta de repuestos.
+- Horario: lunes a viernes de 9 a 17 hs. Sábados, domingos y feriados cerrado.
+- Envíos: a todo el país. Costo, empresa y demora del envío: PENDIENTE (se cotiza según destino).
+- Retiro de repuestos: en el local de Martínez, en horario de atención.
+
+2) SafetyCar Arg (Instagram @safetycar.arg): taller de chapa y pintura.
+- Dirección del taller: Albariños 1658, Mataderos (CABA). Ojo: es otra dirección, NO es el local de Martínez.
+- Horario del taller: PENDIENTE
+- Qué trabajos se pueden hacer, cuánto cuestan y cuánto demoran lo define el especialista del taller después de ver el daño. Nunca adelantes precios, demoras ni si un trabajo se puede hacer.
+- Para cotizar se necesitan: fotos y/o videos del daño, y marca, modelo y año del auto. Una vez que el cliente mandó todo, registrá la solicitud de presupuesto y decile que ya quedó registrada y que la está revisando un especialista, que en breve le responde con la cotización.
 - Turnos: los coordina el taller; el bot toma el pedido (fecha y horario preferidos) y alguien del equipo lo confirma.
+
+Para los dos:
+- Medios de pago: efectivo, transferencia, tarjeta y Mercado Pago. Cuotas o recargos: PENDIENTE.
+- Si no queda claro si el cliente busca un repuesto o un trabajo de chapa y pintura, preguntale.
 `;
 
-// Lun a vie de 9 a 17, hora de Argentina. Fuera de horario el bot contesta igual, pero lo que
+// Horario del local de Martínez: lun a vie de 9 a 17, hora de Argentina. Fuera de horario el bot contesta igual, pero lo que
 // necesita una persona se confirma el próximo día hábil.
 function enHorario(ahora: Date) {
   const ar = new Date(ahora.toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }));
@@ -63,7 +72,7 @@ REPUESTOS
 TURNOS, RETIROS Y PRESUPUESTOS
 - Juntá lo necesario de forma conversada (no como formulario): nombre, vehículo, qué necesita y cuándo le queda bien.
 - Con eso, registrá la solicitud con registrar_solicitud y decile que alguien del taller se lo confirma a la brevedad. Nunca confirmes un turno vos.
-- Para chapa y pintura nunca des precios: pedí fotos del daño y los datos del auto, y registrá un presupuesto.
+- Para chapa y pintura nunca des precios: pedí fotos o videos del daño y los datos del auto, y registrá un presupuesto.
 
 LÍMITES
 - Nunca inventes datos: si algo figura como PENDIENTE o no lo sabés, decí que lo consultás y usá derivar_a_persona.

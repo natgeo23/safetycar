@@ -28,7 +28,8 @@ function extraer(m: Mensaje | undefined) {
   const texto =
     m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || m.documentMessage?.caption;
   const tipo = m.audioMessage ? "audio" : m.imageMessage ? "foto" : m.stickerMessage ? "sticker" : m.videoMessage ? "video" : null;
-  const mime = (m.audioMessage ?? m.imageMessage)?.mimetype?.split(";")[0];
+  // Videos solo si son cortos (entran en MEDIA_MAX); los largos quedan como "[video]" y los ve el taller.
+  const mime = (m.audioMessage ?? m.imageMessage ?? m.videoMessage)?.mimetype?.split(";")[0];
   const media = mime && m.base64 && m.base64.length < MEDIA_MAX ? { mime, data: m.base64 } : null;
   return { texto: texto || (tipo ? `[${tipo}]` : null), media };
 }
