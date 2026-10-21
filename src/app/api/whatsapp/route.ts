@@ -174,7 +174,7 @@ async function procesar(e: Entrada) {
     return null;
   });
   if (!respuesta) {
-    respuesta = "Dame un ratito que lo consulto y te escribo 👍";
+    respuesta = "¡Hola! Disculpá la demora, ya te leo y te respondo en un ratito 🙏";
     await acciones.derivar("El asistente no pudo responder, revisar la conversación");
   }
 

@@ -133,9 +133,52 @@ function variantes(palabra: string) {
   return [...new Set([palabra, p, ...(grupo ?? [])])].filter((v) => v.length > 2 || grupo?.includes(v));
 }
 
-async function generar(model: string, contents: Content[], config: GenerateContentConfig) {
+// Gemini Flash seguido devuelve 503 "high demand" y a veces el respaldo se cuelga: se corre una
+// carrera entre los dos y, si ambos fallan, se reintenta una vez antes de rendirse.
+const LANZAR_RESPALDO_MS = 5_000;
+const TIMEOUT_MS = 18_000;
+const INTENTOS = 2;
+
+async function conCobertura(principal: string, respaldo: string, contents: Content[], config: GenerateContentConfig) {
+  let ultimo: unknown;
+  for (let intento = 1; intento <= INTENTOS; intento++) {
+    try {
+      return await carrera(principal, respaldo, contents, config);
+    } catch (e) {
+      ultimo = e;
+      console.warn(`Gemini intento ${intento}/${INTENTOS} falló:`, e instanceof Error ? e.message.slice(0, 200) : e);
+      if (intento < INTENTOS) await new Promise((ok) => setTimeout(ok, 1_500));
+    }
+  }
+  throw ultimo;
+}
+
+// Arranca el principal; el respaldo sale si el principal falla o tarda más de LANZAR_RESPALDO_MS.
+// Gana el primero que conteste y el otro se cancela.
+async function carrera(principal: string, respaldo: string, contents: Content[], config: GenerateContentConfig) {
   client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  return client.models.generateContent({ model, contents, config: { ...config, abortSignal: AbortSignal.timeout(25_000) } });
+  const pedir = (model: string, signal: AbortSignal) =>
+    client!.models.generateContent({ model, contents, config: { ...config, abortSignal: AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) } });
+
+  const ctrlP = new AbortController();
+  const ctrlR = new AbortController();
+  let lanzar!: () => void;
+  const listo = new Promise<void>((ok) => (lanzar = ok));
+  const timer = setTimeout(lanzar, LANZAR_RESPALDO_MS);
+
+  const pP = pedir(principal, ctrlP.signal).then((r) => ({ r, model: principal }));
+  pP.catch(() => lanzar());
+  const pR = listo.then(() => pedir(respaldo, ctrlR.signal).then((r) => ({ r, model: respaldo })));
+  try {
+    const ganador = await Promise.any([pP, pR]);
+    (ganador.model === principal ? ctrlR : ctrlP).abort();
+    if (ganador.model !== principal) console.log(`Gemini contestó con ${respaldo}`);
+    return ganador.r;
+  } catch (e) {
+    throw e instanceof AggregateError ? e.errors.at(-1) : e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Corre el agente sobre la conversación y devuelve el texto a mandar (o null si no hay que contestar).
@@ -153,10 +196,7 @@ export async function responder(contents: Content[], nota: string, acciones: Acc
     // En la última vuelta no hay más herramientas: tiene que contestarle al cliente sí o sí.
     const cfg: GenerateContentConfig =
       vuelta === VUELTAS - 1 ? { ...config, toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.NONE } } } : config;
-    const r = await generar(principal, historial, cfg).catch((e) => {
-      console.warn(`Gemini ${principal} falló, uso ${respaldo}:`, e.message);
-      return generar(respaldo, historial, cfg);
-    });
+    const r = await conCobertura(principal, respaldo, historial, cfg);
     const llamadas = r.functionCalls ?? [];
     if (!llamadas.length) return r.text?.trim() || null;
 
