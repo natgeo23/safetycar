@@ -11,7 +11,7 @@ SafetyCar Autopartes (Instagram @safetycar.autopartes): venta de repuestos nuevo
 
 // Horario del local: lun a vie de 9 a 17, hora de Argentina. Fuera de horario el bot contesta igual, pero lo que
 // necesita una persona se confirma el próximo día hábil.
-function enHorario(ahora: Date) {
+export function enHorario(ahora: Date) {
   const ar = new Date(ahora.toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }));
   const dia = ar.getDay();
   const hora = ar.getHours();

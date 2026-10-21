@@ -107,6 +107,9 @@ export async function mensajeDelEquipo(v: Vendedor, texto: string, citado: strin
   }
   const { data: casos } = await query.limit(2);
 
+  // Citó algo que no es un aviso de un caso (ej. el recordatorio): se resuelve por número o por "tomo".
+  if (citado && !casos?.length) return mensajeDelEquipo(v, numero ? `tomo ${numero}` : "tomo", null);
+
   if (!casos?.length) {
     await avisar(v.numero, numero ? `No encuentro la #${numero} 🤔` : "No hay consultas pendientes para tomar 👌");
     return true;
