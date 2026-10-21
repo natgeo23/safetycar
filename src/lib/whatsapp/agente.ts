@@ -1,9 +1,12 @@
 import "server-only";
-import { GoogleGenAI, ThinkingLevel, type Content, type FunctionDeclaration, type GenerateContentConfig } from "@google/genai";
+import { FunctionCallingConfigMode, GoogleGenAI, ThinkingLevel, type Content, type FunctionDeclaration, type GenerateContentConfig } from "@google/genai";
 import { db } from "@/lib/supabase";
 import { promptSistema } from "./taller";
 
 let client: GoogleGenAI | null = null;
+
+// Pasos de herramientas por respuesta, contando la respuesta final.
+const VUELTAS = 6;
 
 // Lo que el agente puede hacer además de hablar. El handler de la ruta implementa los efectos.
 export type Acciones = {
@@ -57,29 +60,67 @@ const HERRAMIENTAS: FunctionDeclaration[] = [
 ];
 
 async function buscarRepuestos(consulta: string) {
-  const palabras = consulta
+  // Cada palabra de la consulta es un "concepto" que puede aparecer con cualquiera de sus variantes.
+  const conceptos = consulta
     .toLowerCase()
-    .replace(/[%,()]/g, " ")
+    .replace(/[%,()*_.]/g, " ")
     .split(/\s+/)
-    .filter((p) => p.length > 1)
-    .slice(0, 5);
-  if (!palabras.length) return [];
-  let query = db()
+    .filter((p) => p.length > 1 && !VACIAS.has(p))
+    .slice(0, 6)
+    .map(variantes);
+  if (!conceptos.length) return [];
+
+  // Trae todo lo que coincida con alguna variante y después ordena por cuántos conceptos cubre:
+  // "burro arranque amarok" encuentra el motor de arranque aunque no diga Amarok.
+  const terminos = [...new Set(conceptos.flat())];
+  const { data, error } = await db()
     .from("repuestos")
-    .select("nombre, marca, codigo, categoria, compatibilidad, descripcion, estado, cantidad, precio")
-    .order("cantidad", { ascending: false })
-    .limit(10);
-  // Cada palabra tiene que aparecer en alguna columna.
-  for (const p of palabras) {
-    query = query.or(
-      ["nombre", "marca", "codigo", "codigo_barras", "categoria", "compatibilidad", "descripcion"]
-        .map((c) => `${c}.ilike.%${p}%`)
-        .join(","),
-    );
-  }
-  const { data, error } = await query;
+    .select("nombre, marca, codigo, codigo_barras, categoria, compatibilidad, descripcion, estado, cantidad, precio")
+    .or(terminos.flatMap((t) => COLUMNAS.map((c) => `${c}.ilike.%${t}%`)).join(","))
+    .limit(80);
   if (error) throw new Error(error.message);
-  return (data ?? []).map((r) => ({ ...r, cantidad: r.cantidad > 0 ? r.cantidad : "sin stock" }));
+
+  const puntuados = (data ?? []).map((r) => {
+    const texto = sinAcentos(COLUMNAS.map((c) => (r as Record<string, unknown>)[c] ?? "").join(" ").toLowerCase());
+    return { r, puntos: conceptos.filter((vs) => vs.some((v) => texto.includes(sinAcentos(v)))).length };
+  });
+  puntuados.sort((a, b) => b.puntos - a.puntos || b.r.cantidad - a.r.cantidad);
+  return puntuados.slice(0, 10).map(({ r, puntos }) => ({
+    nombre: r.nombre,
+    marca: r.marca,
+    codigo: r.codigo,
+    categoria: r.categoria,
+    compatibilidad: r.compatibilidad,
+    descripcion: r.descripcion,
+    estado: r.estado,
+    precio: r.precio,
+    cantidad: r.cantidad > 0 ? r.cantidad : "sin stock",
+    // Parcial: coincide con parte de la consulta (ej. es un burro pero no figura para ese auto).
+    coincidencia: puntos === conceptos.length ? "completa" : "parcial",
+  }));
+}
+
+const COLUMNAS = ["nombre", "marca", "codigo", "codigo_barras", "categoria", "compatibilidad", "descripcion"];
+const VACIAS = new Set(["de", "del", "la", "el", "los", "las", "para", "con", "un", "una", "y", "o", "en", "por", "que"]);
+const sinAcentos = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+// Cómo se dice lo mismo en el mostrador y cómo puede estar cargado en el stock.
+const SINONIMOS = [
+  ["burro", "arranque"],
+  ["optica", "faro"],
+  ["parrilla", "bandeja", "brazo"],
+  ["paragolpe", "paragolpes"],
+  ["amortiguador", "amortiguadores"],
+  ["volkswagen", "volswagen", "wolkswagen", "vw"],
+  ["chevrolet", "chevy"],
+  ["mercedes", "benz"],
+];
+
+function variantes(palabra: string) {
+  const p = sinAcentos(palabra);
+  const grupo = SINONIMOS.find((g) => g.includes(p));
+  // Las de 2 letras (ej. "vw") solo valen como sinónimo, no como búsqueda suelta.
+  return [...new Set([palabra, p, ...(grupo ?? [])])].filter((v) => v.length > 2 || grupo?.includes(v));
 }
 
 async function generar(model: string, contents: Content[], config: GenerateContentConfig) {
@@ -98,10 +139,13 @@ export async function responder(contents: Content[], nota: string, acciones: Acc
   };
 
   const historial = [...contents];
-  for (let vuelta = 0; vuelta < 5; vuelta++) {
-    const r = await generar(principal, historial, config).catch((e) => {
+  for (let vuelta = 0; vuelta < VUELTAS; vuelta++) {
+    // En la última vuelta no hay más herramientas: tiene que contestarle al cliente sí o sí.
+    const cfg: GenerateContentConfig =
+      vuelta === VUELTAS - 1 ? { ...config, toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.NONE } } } : config;
+    const r = await generar(principal, historial, cfg).catch((e) => {
       console.warn(`Gemini ${principal} falló, uso ${respaldo}:`, e.message);
-      return generar(respaldo, historial, config);
+      return generar(respaldo, historial, cfg);
     });
     const llamadas = r.functionCalls ?? [];
     if (!llamadas.length) return r.text?.trim() || null;

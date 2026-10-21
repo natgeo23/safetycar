@@ -139,7 +139,7 @@ async function procesar(e: Entrada) {
   await dormir(azar(1_000, 3_000));
   await marcarLeido(e.jid, sinLeer);
 
-  const respuesta = await responder(aContenido(historial), nota, {
+  const acciones = {
     registrarSolicitud: async (s: Solicitud) => {
       await db().from("wa_solicitudes").insert({ jid: e.jid, ...s, nombre: s.nombre ?? estado?.nombre ?? null });
       await avisarEquipo(
@@ -152,8 +152,16 @@ async function procesar(e: Entrada) {
       await pausar(e.jid);
       await avisarEquipo(`🙋 Un cliente necesita que lo atienda alguien\n${estado?.nombre ?? ""} · wa.me/${e.telefono ?? ""}\n${motivo}`);
     },
+  };
+  // El cliente nunca se queda sin respuesta: si la IA falla, contesta algo humano y avisa al equipo.
+  let respuesta = await responder(aContenido(historial), nota, acciones).catch((err) => {
+    console.error("agente:", err);
+    return null;
   });
-  if (!respuesta) return;
+  if (!respuesta) {
+    respuesta = "Dame un ratito que lo consulto y te escribo 👍";
+    await acciones.derivar("El asistente no pudo responder, revisar la conversación");
+  }
 
   // Como en un chat real: varios mensajes cortos, cada uno con su "escribiendo…".
   const partes = respuesta.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
