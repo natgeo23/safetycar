@@ -64,7 +64,7 @@ async function armarReporte(desde: Date) {
     `📊 *Resumen semanal · SafetyCar Autopartes*`,
     `${fecha(desde)} al ${fecha(new Date())}`,
     "",
-    `💬 Conversaciones: *${conversaciones.size}* (${nuevos} clientes nuevos)`,
+    `💬 Conversaciones: *${conversaciones.size}* (${nuevos} ${nuevos === 1 ? "cliente nuevo" : "clientes nuevos"})`,
     `🙋 Consultas y pedidos para ventas: *${lista.length}*`,
     ...[...porVendedor].map(([v, n]) => `   • ${v} tomó ${n}`),
     sinTomar.length ? `   • ⚠️ Sin tomar: ${sinTomar.length}` : null,
