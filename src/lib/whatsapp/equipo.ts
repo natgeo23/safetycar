@@ -1,6 +1,6 @@
 import "server-only";
 import { db } from "@/lib/supabase";
-import { enviarTexto } from "./evolution";
+import { enviarMedia, enviarTexto, obtenerMedia } from "./evolution";
 
 export type Vendedor = { nombre: string; numero: string };
 
@@ -109,6 +109,54 @@ export async function crearCaso(c: Caso) {
   return data.id as number;
 }
 
+const MEDIA_MAX_REENVIO = 10;
+
+// Reenvía a alguien de ventas las fotos, videos y audios que mandó el cliente (desde una fecha o
+// unos mensajes puntuales). Los descarga de Evolution, así que sirven aunque sean grandes.
+export async function reenviarMedia(jid: string, numero: string, titulo: string, filtro: { desde?: Date; ids?: string[] }) {
+  let query = db().from("wa_mensajes").select("id, texto").eq("jid", jid).eq("rol", "cliente").not("media", "is", null);
+  if (filtro.ids) query = query.in("id", filtro.ids);
+  if (filtro.desde) query = query.gte("created_at", filtro.desde.toISOString());
+  const { data: filas } = await query.order("created_at").limit(MEDIA_MAX_REENVIO);
+  if (!filas?.length) return 0;
+
+  await avisar(numero, titulo);
+  const destinoJid = `${numero}@s.whatsapp.net`;
+  let enviados = 0;
+  for (const f of filas) {
+    try {
+      const m = await obtenerMedia(f.id);
+      if (!m) continue;
+      // El texto que acompañaba la foto (si no era solo "[foto]") va como pie.
+      const pie = f.texto && !/^\[(foto|video|audio)\]$/.test(f.texto) ? f.texto : undefined;
+      const id = await enviarMedia(numero, m, pie);
+      if (id) await db().from("wa_mensajes").insert({ id, jid: destinoJid, rol: "aviso", texto: `[reenvío] ${pie ?? ""}` });
+      enviados++;
+    } catch (err) {
+      console.error(`reenvío de ${f.id}:`, err);
+    }
+  }
+  return enviados;
+}
+
+// Si el cliente tiene una consulta abierta que ya tomó alguien, le reenvía a esa persona lo que manda.
+export async function reenviarATomador(jid: string, ids: string[]) {
+  const { data: caso } = await db()
+    .from("wa_solicitudes")
+    .select("id, nombre, tomada_por")
+    .eq("jid", jid)
+    .eq("tipo", "consulta")
+    .eq("estado", "pendiente")
+    .not("tomada_por", "is", null)
+    .gte("created_at", new Date(Date.now() - MISMA_CONSULTA_HORAS * 3_600_000).toISOString())
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const vendedor = equipo().find((v) => v.nombre === caso?.tomada_por);
+  if (!caso || !vendedor) return;
+  await reenviarMedia(jid, vendedor.numero, `📎 ${caso.nombre ?? "El cliente"} mandó esto (#${caso.id}):`, { ids });
+}
+
 const QUIERE_TOMAR = /\b(tomo|la tomo|lo tomo|yo|m[ií]a|me encargo|lo veo yo|la veo yo)\b/i;
 
 // Mensaje de alguien del equipo al WhatsApp del local. Si es para tomar un caso, lo asigna,
@@ -145,11 +193,15 @@ export async function mensajeDelEquipo(v: Vendedor, texto: string, citado: strin
 
   const caso = casos[0];
   const cliente = caso.nombre ?? "el cliente";
+  const ultimoDia = { desde: new Date(Date.now() - 86_400_000) };
+  if (caso.tomada_por === v.nombre) {
+    // Pedirla de nuevo sirve para que le vuelvan a llegar las fotos.
+    await avisar(v.numero, `Ya es tuya la #${caso.id} 👍`);
+    await reenviarMedia(caso.jid, v.numero, `📎 Lo que mandó ${cliente} (#${caso.id}):`, ultimoDia);
+    return true;
+  }
   if (caso.tomada_por) {
-    await avisar(
-      v.numero,
-      caso.tomada_por === v.nombre ? `Ya es tuya la #${caso.id} 👍` : `La #${caso.id} (${cliente}) ya la tomó ${caso.tomada_por}.`,
-    );
+    await avisar(v.numero, `La #${caso.id} (${cliente}) ya la tomó ${caso.tomada_por}.`);
     return true;
   }
 
@@ -166,5 +218,7 @@ export async function mensajeDelEquipo(v: Vendedor, texto: string, citado: strin
   for (const otro of equipo().filter((o) => o.numero !== v.numero)) {
     await avisar(otro.numero, `👍 ${v.nombre} tomó la #${caso.id} (${cliente}). No hace falta que la atiendas.`);
   }
+  // Fotos, videos y audios que mandó el cliente en el último día, para no tener que pedírselos.
+  await reenviarMedia(caso.jid, v.numero, `📎 Lo que mandó ${cliente} (#${caso.id}):`, ultimoDia);
   return true;
 }

@@ -2,7 +2,7 @@ import type { Content, Part } from "@google/genai";
 import { after, NextResponse } from "next/server";
 import { db } from "@/lib/supabase";
 import { responder, type Solicitud } from "@/lib/whatsapp/agente";
-import { crearCaso, equipo, mensajeDelEquipo } from "@/lib/whatsapp/equipo";
+import { crearCaso, equipo, mensajeDelEquipo, reenviarATomador } from "@/lib/whatsapp/equipo";
 import { enviarTexto, escribiendo, marcarLeido } from "@/lib/whatsapp/evolution";
 
 // El trabajo corre en after(): esperar ráfagas, "leer", "escribir" y la IA entran holgados.
@@ -33,9 +33,10 @@ function extraer(m: Mensaje | undefined) {
   const texto =
     m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || m.documentMessage?.caption;
   const tipo = m.audioMessage ? "audio" : m.imageMessage ? "foto" : m.stickerMessage ? "sticker" : m.videoMessage ? "video" : null;
-  // Videos solo si son cortos (entran en MEDIA_MAX); los largos quedan como "[video]" y los ve el taller.
+  // Se marca siempre que trae foto, video o audio (para reenviarlo a ventas); el contenido solo se
+  // guarda si es chico, para que lo vea la IA. Los videos largos quedan sin data.
   const mime = (m.audioMessage ?? m.imageMessage ?? m.videoMessage)?.mimetype?.split(";")[0];
-  const media = mime && m.base64 && m.base64.length < MEDIA_MAX ? { mime, data: m.base64 } : null;
+  const media = mime ? { mime, data: m.base64 && m.base64.length < MEDIA_MAX ? m.base64 : null } : null;
   return { texto: texto || (tipo ? `[${tipo}]` : null), media };
 }
 
@@ -71,7 +72,7 @@ type Entrada = {
   telefono: string | null;
   nombre?: string;
   texto: string;
-  media: { mime: string; data: string } | null;
+  media: { mime: string; data: string | null } | null;
   citado: string | null;
 };
 
@@ -110,6 +111,8 @@ async function procesar(e: Entrada) {
 
   const { error } = await db().from("wa_mensajes").insert({ id: e.id, jid: e.jid, rol: "cliente", texto: e.texto, media: e.media });
   if (error) return; // duplicado: Evolution reintentó el webhook
+  // Fotos o videos nuevos de una consulta que ya tomó alguien: se los reenvía, en paralelo a la respuesta.
+  if (e.media) after(() => reenviarATomador(e.jid, [e.id]).catch((err) => console.error("reenvío:", err)));
 
   const modo = process.env.BOT_MODO || "prueba";
   if (modo === "apagado") return;
@@ -228,7 +231,7 @@ async function procesar(e: Entrada) {
     .lt("created_at", new Date(Date.now() - 2 * 86_400_000).toISOString());
 }
 
-type Fila = { rol: string; texto: string | null; media: { mime: string; data: string } | null };
+type Fila = { rol: string; texto: string | null; media: { mime: string; data: string | null } | null };
 
 // Gemini pide turnos alternados que empiecen y terminen con el usuario.
 function aContenido(filas: Fila[]): Content[] {
@@ -237,7 +240,7 @@ function aContenido(filas: Fila[]): Content[] {
     const role = f.rol === "cliente" ? "user" : "model";
     const parts: Part[] = [];
     if (f.texto) parts.push({ text: f.texto });
-    if (role === "user" && f.media && i >= filas.length - 10) parts.push({ inlineData: { mimeType: f.media.mime, data: f.media.data } });
+    if (role === "user" && f.media?.data && i >= filas.length - 10) parts.push({ inlineData: { mimeType: f.media.mime, data: f.media.data } });
     if (!parts.length) return;
     const previo = contenido.at(-1);
     if (previo?.role === role) previo.parts!.push(...parts);
