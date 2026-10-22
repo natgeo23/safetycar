@@ -35,6 +35,7 @@ export default function Stock() {
   const [error, setError] = useState<string | null>(null);
   const [vista, setVista] = usePreferencia<Vista>("sc-vista", "lista");
   const [filtro, setFiltro] = usePreferencia<string[]>("sc-filtro", []);
+  const [plegadas, setPlegadas] = usePreferencia<string[]>("sc-plegadas", []);
   const [filtroAbierto, setFiltroAbierto] = useState(false);
   const [clasificando, setClasificando] = useState(false);
 
@@ -79,6 +80,11 @@ export default function Stock() {
     for (const r of visibles) m.set(categoriaDe(r), [...(m.get(categoriaDe(r)) ?? []), r]);
     return [...m.entries()].sort(([a], [b]) => orden.indexOf(a) - orden.indexOf(b));
   }, [visibles]);
+
+  const buscando = q.trim().length > 0;
+  const todasPlegadas = grupos.length > 0 && grupos.every(([c]) => plegadas.includes(c));
+  const alternarPlegada = (c: string) =>
+    setPlegadas(plegadas.includes(c) ? plegadas.filter((x) => x !== c) : [...plegadas, c]);
 
   const unidades = visibles.reduce((s, x) => s + x.cantidad, 0);
   const aRevisar = items?.filter((r) => r.revisar).length ?? 0;
@@ -157,29 +163,48 @@ export default function Stock() {
         </div>
       )}
 
-      {grupos.map(([categoria, lista]) => (
-        <section key={categoria} className="mt-5">
-          <h2 className="sticky top-0 z-10 -mx-4 flex items-center justify-between bg-ink/95 px-4 py-2 backdrop-blur">
-            <span className="text-sm font-bold uppercase tracking-wide text-light">
-              {categoria} <span className="font-normal text-mute">· {lista.length}</span>
-            </span>
-            {categoria === SIN_CATEGORIA && (
-              <button onClick={clasificar} disabled={clasificando} className="text-sm text-brand disabled:opacity-50">
-                {clasificando ? "Clasificando…" : "Clasificar con IA"}
+      {grupos.length > 1 && !buscando && (
+        <div className="mt-3 flex justify-end">
+          <button onClick={() => setPlegadas(todasPlegadas ? [] : grupos.map(([c]) => c))} className="text-sm text-mute underline">
+            {todasPlegadas ? "Desplegar todas" : "Plegar todas"}
+          </button>
+        </div>
+      )}
+
+      {grupos.map(([categoria, lista]) => {
+        // Mientras se busca se muestran todas, para no esconder resultados.
+        const abierta = buscando || !plegadas.includes(categoria);
+        return (
+          <section key={categoria} className="mt-3">
+            <h2 className="sticky top-0 z-10 -mx-4 flex items-center justify-between bg-ink/95 px-4 backdrop-blur">
+              <button onClick={() => alternarPlegada(categoria)} aria-expanded={abierta}
+                className="flex flex-1 items-center gap-2 py-3 text-left">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+                  strokeLinejoin="round" aria-hidden className={`text-mute transition-transform ${abierta ? "rotate-90" : ""}`}>
+                  <path d="m9 6 6 6-6 6" />
+                </svg>
+                <span className="text-sm font-bold uppercase tracking-wide text-light">
+                  {categoria} <span className="font-normal text-mute">· {lista.length}</span>
+                </span>
               </button>
-            )}
-          </h2>
-          {vista === "lista" ? (
-            <ul className="space-y-2">
-              {lista.map((r) => <FilaLista key={r.id} r={r} />)}
-            </ul>
-          ) : (
-            <ul className={`grid gap-2 ${GRILLA[vista]}`}>
-              {lista.map((r) => <Tarjeta key={r.id} r={r} columnas={vista} />)}
-            </ul>
-          )}
-        </section>
-      ))}
+              {categoria === SIN_CATEGORIA && (
+                <button onClick={clasificar} disabled={clasificando} className="py-3 text-sm text-brand disabled:opacity-50">
+                  {clasificando ? "Clasificando…" : "Clasificar con IA"}
+                </button>
+              )}
+            </h2>
+            {abierta && (vista === "lista" ? (
+              <ul className="space-y-2">
+                {lista.map((r) => <FilaLista key={r.id} r={r} />)}
+              </ul>
+            ) : (
+              <ul className={`grid gap-2 ${GRILLA[vista]}`}>
+                {lista.map((r) => <Tarjeta key={r.id} r={r} columnas={vista} />)}
+              </ul>
+            ))}
+          </section>
+        );
+      })}
 
       <div className="fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-20 mx-auto flex max-w-3xl gap-3">
         <Link href="/importar" aria-label="Importar muchas fotos"
