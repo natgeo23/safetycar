@@ -138,6 +138,8 @@ export default function Cargar() {
       setAviso(`✓ ${form.nombre} guardado`);
       setTimeout(() => setAviso(null), 2500);
       reiniciar();
+      // La ubicación suele repetirse (mismo estante), así que queda cargada para el siguiente.
+      setForm({ ...VACIO, ubicacion: form.ubicacion });
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
       setError((e as Error).message);

@@ -4,7 +4,7 @@ import { pick } from "@/lib/types";
 
 export async function GET(request: NextRequest) {
   const q = request.nextUrl.searchParams.get("q")?.trim().replace(/[%,()]/g, " ");
-  let query = db().from("repuestos").select("*").order("created_at", { ascending: false }).limit(200);
+  let query = db().from("repuestos").select("*").order("created_at", { ascending: false }).limit(2000);
   if (q) {
     const like = `%${q}%`;
     query = query.or(
