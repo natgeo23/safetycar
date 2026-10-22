@@ -17,6 +17,10 @@ const PAUSA_HORAS = 6;
 // Un mensaje "del celular" que sale antes de esto después del cliente es una respuesta automática.
 const AUTOMATICO_MS = 10_000;
 const HISTORIAL = 30;
+// Una respuesta en curso "reserva" el chat por este tiempo (por si la función se corta en el medio).
+const TURNO_MS = 90_000;
+// Veces que rehace la respuesta si el cliente sigue escribiendo; en la última manda sí o sí.
+const INTENTOS_RESPUESTA = 3;
 const MEDIA_MAX = 4_000_000; // base64
 
 const dormir = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
@@ -130,8 +134,67 @@ async function procesar(e: Entrada) {
     .single();
   if (ultimo?.id !== e.id) return;
 
+  await atender(e);
+}
+
+// Una sola respuesta a la vez por chat. Si el cliente sigue escribiendo mientras Stefy contesta, lo
+// atiende ella misma al terminar (viendo lo que ya escribió), en vez de largar otra respuesta en paralelo.
+async function atender(e: Entrada) {
+  for (let vuelta = 1; vuelta <= INTENTOS_RESPUESTA; vuelta++) {
+    if (!(await tomarTurno(e.jid))) return; // ya está contestando otra invocación: ella lo ve
+    let resultado;
+    try {
+      resultado = await responderPendientes(e, vuelta === INTENTOS_RESPUESTA);
+    } finally {
+      await soltarTurno(e.jid);
+    }
+    if (resultado === "listo" && (await ultimoRol(e.jid)) !== "cliente") return;
+  }
+}
+
+async function tomarTurno(jid: string) {
+  const ahora = new Date();
+  const { data, error } = await db()
+    .from("wa_chats")
+    .update({ respondiendo_hasta: new Date(ahora.getTime() + TURNO_MS).toISOString() })
+    .eq("jid", jid)
+    .or(`respondiendo_hasta.is.null,respondiendo_hasta.lt.${ahora.toISOString()}`)
+    .select("jid");
+  if (error) return true; // sin la columna (falta el SQL) se contesta igual, como antes
+  return !!data?.length;
+}
+
+async function soltarTurno(jid: string) {
+  await db().from("wa_chats").update({ respondiendo_hasta: null }).eq("jid", jid);
+}
+
+async function ultimoDelCliente(jid: string) {
+  const { data } = await db()
+    .from("wa_mensajes")
+    .select("id")
+    .eq("jid", jid)
+    .eq("rol", "cliente")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.id ?? null;
+}
+
+async function ultimoRol(jid: string) {
+  const { data } = await db()
+    .from("wa_mensajes")
+    .select("rol")
+    .eq("jid", jid)
+    .neq("rol", "aviso")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.rol ?? null;
+}
+
+async function responderPendientes(e: Entrada, ultimoIntento: boolean): Promise<"listo" | "rehacer"> {
   const { data: estado } = await db().from("wa_chats").select("pausado_hasta, nombre, nombre_cliente").eq("jid", e.jid).single();
-  if (estado?.pausado_hasta && new Date(estado.pausado_hasta) > new Date()) return;
+  if (estado?.pausado_hasta && new Date(estado.pausado_hasta) > new Date()) return "listo";
   let nombre: string | null = estado?.nombre_cliente ?? null;
 
   const { data: filas } = await db()
@@ -142,6 +205,8 @@ async function procesar(e: Entrada) {
     .order("created_at", { ascending: false })
     .limit(HISTORIAL);
   const historial = (filas ?? []).reverse();
+  if (historial.at(-1)?.rol !== "cliente") return "listo"; // ya está todo respondido
+  const ultimoLeido = historial.at(-1)!.id;
 
   const destino = e.telefono ?? e.jid;
   const sinLeer = [];
@@ -202,14 +267,22 @@ async function procesar(e: Entrada) {
     return null;
   });
   if (!respuesta) {
-    respuesta = "¡Hola! Disculpá la demora, ya te leo y te respondo en un ratito 🙏";
+    respuesta = "Ahí te leo, dame un minuto 👍";
     await acciones.derivar("El asistente no pudo responder, revisar la conversación");
   }
 
-  // Como en un chat real: varios mensajes cortos, cada uno con su "escribiendo…".
+  // Si mientras pensaba el cliente escribió algo más, se rehace con todo (salvo en el último intento).
+  if (!ultimoIntento && (await ultimoDelCliente(e.jid)) !== ultimoLeido) {
+    await Promise.all(tareas);
+    return "rehacer";
+  }
+
+  // Como en un chat real: uno o dos mensajes cortos, cada uno con su "escribiendo…".
   const partes = respuesta.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
-  const mensajes = partes.length > 3 ? [...partes.slice(0, 2), partes.slice(2).join("\n\n")] : partes;
+  const mensajes = partes.length > 2 ? [partes[0], partes.slice(1).join("\n\n")] : partes;
   for (const [i, texto] of mensajes.entries()) {
+    // Si el cliente escribió en el medio, lo que faltaba mandar quedó viejo: se corta y se rehace.
+    if (i > 0 && !ultimoIntento && (await ultimoDelCliente(e.jid)) !== ultimoLeido) break;
     if (i === 0) {
       // Ya estuvo "escribiendo" mientras pensaba: solo completa el mínimo si la IA fue muy rápida.
       await dormir(Math.max(PRIMERA_RESPUESTA_MS - (Date.now() - inicio), 0));
@@ -219,7 +292,7 @@ async function procesar(e: Entrada) {
     const id = await enviarTexto(destino, texto);
     await db().from("wa_mensajes").insert({ id: id ?? `bot-${crypto.randomUUID()}`, jid: e.jid, rol: "bot", texto });
   }
-  console.log(`respuesta en ${Date.now() - inicio} ms desde que leyó (${mensajes.length} mensajes)`);
+  console.log(`respuesta en ${Date.now() - inicio} ms desde que leyó`);
   await Promise.all(tareas);
 
   // El contenido de audios y fotos solo le sirve a la IA mientras la charla está fresca: después se
@@ -234,6 +307,7 @@ async function procesar(e: Entrada) {
   for (const v of viejos ?? []) {
     await db().from("wa_mensajes").update({ media: { mime: v.media.mime, data: null } }).eq("id", v.id);
   }
+  return "listo";
 }
 
 type Fila = { rol: string; texto: string | null; media: { mime: string; data: string | null } | null };

@@ -8,6 +8,7 @@ create table if not exists public.wa_chats (
   nombre         text,                      -- nombre de perfil de WhatsApp
   nombre_cliente text,                      -- cómo dijo que se llama (lo guarda el bot)
   pausado_hasta  timestamptz,               -- el bot no contesta hasta esta hora (atiende una persona)
+  respondiendo_hasta timestamptz,           -- hay una respuesta en curso (una sola a la vez por chat)
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
