@@ -1,10 +1,12 @@
 "use client";
 
-import Link from "next/link";
+import { BarraSuperior } from "@/components/BarraSuperior";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Escaner } from "@/components/Escaner";
+import { PosiblesRepetidos } from "@/components/PosiblesRepetidos";
 import { RepuestoForm, VACIO, type FormValues } from "@/components/RepuestoForm";
 import { cuadrosDeVideo, fotoDesdeArchivo, subirFotos, type Foto } from "@/lib/media";
+import type { Parecido } from "@/lib/parecidos";
 
 type IA = { confianza: "alta" | "media" | "baja"; dudas: string | null };
 
@@ -19,6 +21,7 @@ export default function Cargar() {
   const [escaneando, setEscaneando] = useState(false);
   const [guardados, setGuardados] = useState(0);
   const [aviso, setAviso] = useState<string | null>(null);
+  const [parecidos, setParecidos] = useState<Parecido[]>([]);
   const [segundos, setSegundos] = useState(0);
   // Subidas en segundo plano: arrancan apenas se saca la foto.
   const subidas = useRef(new Map<string, Promise<string>>());
@@ -46,6 +49,15 @@ export default function Cargar() {
       if (!res.ok) throw new Error(data.error ?? "Error al analizar");
       setIaRaw(data);
       setIa({ confianza: data.confianza, dudas: data.dudas });
+      // ¿Ya está en stock? Se busca con la ficha que armó la IA.
+      fetch("/api/repuestos/parecidos", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ficha: { ...data, codigo_barras: cod ?? data.codigo_barras } }),
+      })
+        .then((r) => (r.ok ? r.json() : []))
+        .then((p: Parecido[]) => n === ultimaConsulta.current && setParecidos(p))
+        .catch(() => {});
       setForm((f) => ({
         ...f,
         nombre: data.nombre ?? f.nombre,
@@ -114,6 +126,7 @@ export default function Cargar() {
     setForm(VACIO);
     setIa(null);
     setIaRaw(null);
+    setParecidos([]);
     setError(null);
   }
 
@@ -148,6 +161,32 @@ export default function Cargar() {
     }
   }
 
+  // Era uno que ya estaba: suma una unidad al existente en vez de crear un duplicado.
+  async function sumarAlExistente({ repuesto }: Parecido) {
+    setEstado("guardando");
+    setError(null);
+    try {
+      const res = await fetch(`/api/repuestos/${repuesto.id}/stock`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ delta: form.cantidad || 1, motivo: "ingreso (carga repetida)" }),
+      });
+      if (!res.ok) throw new Error("No se pudo sumar al stock");
+      const { cantidad } = await res.json();
+      setGuardados((n) => n + 1);
+      setAviso(`✓ Sumado a ${repuesto.nombre}: ahora hay ${cantidad}`);
+      setTimeout(() => setAviso(null), 3000);
+      const ubicacion = form.ubicacion;
+      reiniciar();
+      setForm({ ...VACIO, ubicacion });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setEstado("idle");
+    }
+  }
+
   useEffect(() => {
     if (estado !== "analizando") return;
     const t = setInterval(() => setSegundos((n) => n + 1), 1000);
@@ -161,12 +200,11 @@ export default function Cargar() {
   const hayMedia = fotos.length > 0 || codigo;
 
   return (
-    <main className="mx-auto w-full max-w-xl px-4 pb-32 pt-4">
-      <header className="mb-4 flex items-center justify-between">
-        <Link href="/" className="text-sm text-mute">← Stock</Link>
-        <h1 className="text-lg font-bold">Cargar repuesto</h1>
-        <span className="min-w-12 text-right text-sm text-brand">{guardados > 0 && `${guardados} hoy`}</span>
-      </header>
+    <main className="mx-auto w-full max-w-xl px-4 pb-32">
+      <BarraSuperior
+        titulo="Cargar repuesto"
+        derecha={guardados > 0 && <span className="text-sm font-semibold text-brand">{guardados} hoy</span>}
+      />
 
       {aviso && (
         <div className="fixed inset-x-4 top-4 z-40 mx-auto max-w-xl rounded-xl bg-brand px-4 py-3 font-semibold text-ink shadow-lg">
@@ -226,6 +264,8 @@ export default function Cargar() {
       )}
 
       {error && <p className="mt-4 rounded-xl bg-red-500/15 p-3 text-sm text-red-200">{error}</p>}
+
+      <PosiblesRepetidos parecidos={parecidos} accion="Es este: sumar al stock" onElegir={sumarAlExistente} ocupado={ocupado} />
 
       <form onSubmit={guardar} className="mt-6">
         <RepuestoForm value={form} onChange={setForm} />

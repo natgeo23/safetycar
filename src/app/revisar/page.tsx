@@ -1,8 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { BarraSuperior } from "@/components/BarraSuperior";
 import { useEffect, useState } from "react";
+import { PosiblesRepetidos } from "@/components/PosiblesRepetidos";
 import { RepuestoForm, type FormValues } from "@/components/RepuestoForm";
+import { GaleriaFotos } from "@/components/VisorFotos";
+import type { Parecido } from "@/lib/parecidos";
 import type { Repuesto } from "@/lib/types";
 
 type ConIA = Repuesto & { ia_datos?: { dudas?: string | null; confianza?: string } | null };
@@ -52,6 +56,17 @@ export default function Revisar() {
   }, []);
 
   const actual = cola?.[0];
+  const [parecidos, setParecidos] = useState<{ id: string; lista: Parecido[] } | null>(null);
+
+  // Para cada importado, busca si ya había uno igual en el stock.
+  useEffect(() => {
+    if (!actual) return;
+    let vigente = true;
+    api("/api/repuestos/parecidos", "POST", { ficha: actual, excluir: actual.id })
+      .then((lista: Parecido[]) => vigente && setParecidos({ id: actual.id, lista }))
+      .catch(() => {});
+    return () => { vigente = false; };
+  }, [actual]);
 
   // Pasa al siguiente de la cola (o, con alFinal, manda el actual al final sin perderlo).
   function mover(alFinal = false) {
@@ -101,12 +116,11 @@ export default function Revisar() {
     });
 
   return (
-    <main className="mx-auto w-full max-w-xl px-4 pb-36 pt-4">
-      <header className="mb-4 flex items-center justify-between">
-        <Link href="/" className="text-sm text-mute">← Stock</Link>
-        <h1 className="text-lg font-bold">Revisar importados</h1>
-        <span className="min-w-12 text-right text-sm text-mute">{cola ? `${cola.length} ${cola.length === 1 ? "queda" : "quedan"}` : ""}</span>
-      </header>
+    <main className="mx-auto w-full max-w-xl px-4 pb-36">
+      <BarraSuperior
+        titulo="Revisar importados"
+        derecha={cola && <span className="whitespace-nowrap text-sm text-mute">{cola.length} {cola.length === 1 ? "queda" : "quedan"}</span>}
+      />
 
       {error && <p className="mb-4 rounded-xl bg-red-500/15 p-3 text-sm text-red-200">{error}</p>}
       {!cola && !error && <div className="h-96 animate-pulse rounded-xl bg-surface" />}
@@ -121,12 +135,7 @@ export default function Revisar() {
 
       {actual && form && (
         <form onSubmit={guardar}>
-          <div className="mb-4 flex snap-x gap-2 overflow-x-auto">
-            {actual.fotos.map((u) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img key={u} src={u} alt="" className="max-h-72 w-full shrink-0 snap-start rounded-xl object-contain bg-surface" />
-            ))}
-          </div>
+          <GaleriaFotos key={actual.id} fotos={actual.fotos} />
 
           {actual.ia_datos?.dudas && (
             <p className="mb-4 rounded-xl bg-amber-400/10 p-3 text-sm text-amber-200">Verificá: {actual.ia_datos.dudas}</p>
@@ -134,6 +143,17 @@ export default function Revisar() {
           {!actual.ia_datos && (
             <p className="mb-4 rounded-xl bg-amber-400/10 p-3 text-sm text-amber-200">La IA no pudo identificarlo: completalo a mano.</p>
           )}
+
+          <PosiblesRepetidos
+            parecidos={parecidos?.id === actual.id ? parecidos.lista.filter((p) => p.repuesto.id !== anterior?.id) : []}
+            accion="Es este: sumar 1 y borrar el importado"
+            ocupado={ocupado}
+            onElegir={({ repuesto }) => accion(async () => {
+              await api(`/api/repuestos/${repuesto.id}/stock`, "POST", { delta: actual.cantidad || 1, motivo: "ingreso (importación repetida)" });
+              await api(`/api/repuestos/${actual.id}`, "DELETE");
+              mover();
+            })}
+          />
 
           {anterior && (
             <button type="button" onClick={unirConAnterior} disabled={ocupado}

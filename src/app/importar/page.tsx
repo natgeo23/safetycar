@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { BarraSuperior } from "@/components/BarraSuperior";
 import { useEffect, useRef, useState } from "react";
 import { fotoDesdeArchivo, subirFotos } from "@/lib/media";
 import { ESTADOS, ESTADO_LABEL, type Estado } from "@/lib/types";
@@ -154,12 +155,8 @@ export default function Importar() {
   const campo = "w-full rounded-lg border border-line bg-surface px-3 py-3 text-base text-white placeholder:text-mute focus:border-brand focus:outline-none";
 
   return (
-    <main className="mx-auto w-full max-w-xl px-4 pb-32 pt-4">
-      <header className="mb-4 flex items-center justify-between">
-        <Link href="/" className="text-sm text-mute">← Stock</Link>
-        <h1 className="text-lg font-bold">Importar fotos</h1>
-        <span className="w-12" />
-      </header>
+    <main className="mx-auto w-full max-w-xl px-4 pb-32">
+      <BarraSuperior titulo="Importar fotos" />
 
       {fase === "elegir" && (
         <>
