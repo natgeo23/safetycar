@@ -45,6 +45,25 @@ async function aFoto(canvas: HTMLCanvasElement): Promise<Foto> {
   }
 }
 
+// Algunos navegadores no abren HEIC con createImageBitmap pero sí con <img>.
+async function decodificar(file: File): Promise<ImageBitmap> {
+  try {
+    return await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      return await createImageBitmap(img);
+    } catch {
+      throw new Error("Formato de foto no soportado");
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+}
+
 // De a una foto por vez: decodificar una foto de 12 MP ocupa ~50 MB, y varias juntas cuelgan el celu.
 // Las subidas y la IA sí siguen en paralelo.
 let fila: Promise<unknown> = Promise.resolve();
@@ -56,7 +75,7 @@ function enFila<T>(tarea: () => Promise<T>): Promise<T> {
 
 export function fotoDesdeArchivo(file: File): Promise<Foto> {
   return enFila(async () => {
-    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const bitmap = await decodificar(file);
     try {
       return await aFoto(canvasDesde(bitmap, bitmap.width, bitmap.height));
     } finally {

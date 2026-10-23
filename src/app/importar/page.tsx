@@ -190,6 +190,10 @@ export default function Importar() {
             Elegí todas las fotos de la galería. Cada foto se convierte en un repuesto: la IA completa los datos y
             después los revisás uno por uno. Si un repuesto tiene varias fotos, en la revisión los podés unir.
           </p>
+          <p className="mt-3 rounded-xl bg-amber-400/10 p-3 text-sm text-amber-200">
+            En iPhone conviene elegir de a <b>40-50 fotos</b> por vez. Las que ya se importaron se saltean solas,
+            así que podés volver a elegir desde donde quedaste.
+          </p>
 
           <button onClick={() => input.current?.click()}
             className="mt-5 w-full rounded-2xl border-2 border-dashed border-line bg-surface py-10 text-center active:border-brand">
@@ -197,7 +201,8 @@ export default function Importar() {
             <span className="mt-2 block font-semibold">{total ? `${total} fotos elegidas` : "Elegir fotos"}</span>
             {repetidas > 0 && <span className="mt-1 block text-sm text-mute">{repetidas} ya estaban importadas y se saltean</span>}
           </button>
-          <input ref={input} type="file" accept="image/*" multiple hidden
+          {/* Pedir también HEIC evita que el iPhone convierta cada foto a JPEG al elegirlas (con muchas, se cuelga). */}
+          <input ref={input} type="file" accept="image/*,image/heic,image/heif" multiple hidden
             onChange={(e) => { elegir(e.target.files); e.target.value = ""; }} />
 
           <div className="mt-6 space-y-4">
