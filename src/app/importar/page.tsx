@@ -37,15 +37,25 @@ async function analizar(base64: string) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ imagenes: [{ data: base64, media_type: "image/jpeg" }] }),
+      signal: AbortSignal.timeout(55_000), // el servidor corta a los 45 s; esto cubre una conexión colgada
     }).catch(() => null);
     if (res?.ok) return res.json();
   }
   return null; // sin IA igual se crea el repuesto con la foto, para completarlo en la revisión
 }
 
+// Ninguna foto puede trabar la importación: si en este tiempo no terminó, se marca con error y se sigue.
+const MAX_POR_FOTO = 150_000;
+
+function conLimite<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([p, new Promise<T>((_, err) => setTimeout(() => err(new Error("Tardó demasiado")), ms))]);
+}
+
 async function importarUna(file: File, ubicacion: string, estado: Estado): Promise<Hecho> {
   const foto = await fotoDesdeArchivo(file);
-  const [urls, ia] = await Promise.all([subirFotos([foto]), analizar(foto.base64)]);
+  // La subida se reintenta una vez (señal floja en el galpón).
+  const subir = () => subirFotos([foto]).catch(() => subirFotos([foto]));
+  const [urls, ia] = await Promise.all([subir(), analizar(foto.base64)]);
   const res = await fetch("/api/repuestos", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -64,6 +74,7 @@ async function importarUna(file: File, ubicacion: string, estado: Estado): Promi
       revisar: true,
       ia_datos: ia,
     }),
+    signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) {
     URL.revokeObjectURL(foto.url);
@@ -87,6 +98,7 @@ export default function Importar() {
   const pausar = useRef(false);
   const siguiente = useRef(0);
   const input = useRef<HTMLInputElement>(null);
+  const fallidas = useRef<File[]>([]);
 
   function elegir(files: FileList | null) {
     if (!files) return;
@@ -99,9 +111,21 @@ export default function Importar() {
     setHechas(0);
     setErrores([]);
     setUltimas([]);
+    fallidas.current = [];
   }
 
-  async function arrancar() {
+  // Vuelve a intentar solo las fotos que dieron error.
+  function reintentar() {
+    const lista = fallidas.current;
+    fallidas.current = [];
+    setArchivos(lista);
+    siguiente.current = 0;
+    setHechas(0);
+    setErrores([]);
+    arrancar(lista);
+  }
+
+  async function arrancar(lista: File[] = archivos) {
     pausar.current = false;
     setFase("importando");
     setInicio(Date.now() - (hechas > 0 ? (ahora - inicio) : 0));
@@ -113,17 +137,19 @@ export default function Importar() {
     } catch {}
 
     const trabajador = async () => {
-      while (!pausar.current && siguiente.current < archivos.length) {
-        const file = archivos[siguiente.current++];
+      while (!pausar.current && siguiente.current < lista.length) {
+        const file = lista[siguiente.current++];
         try {
-          const hecho = await importarUna(file, ubicacion.trim(), estadoDef);
+          const hecho = await conLimite(importarUna(file, ubicacion.trim(), estadoDef), MAX_POR_FOTO);
           guardarHecha(huella(file));
           setUltimas((u) => {
             const nuevo = [hecho, ...u];
-            nuevo.slice(12).forEach((h) => h.url && URL.revokeObjectURL(h.url));
-            return nuevo.slice(0, 12);
+            // Pocas miniaturas en pantalla: cada una ocupa memoria del celu.
+            nuevo.slice(8).forEach((h) => h.url && URL.revokeObjectURL(h.url));
+            return nuevo.slice(0, 8);
           });
         } catch (e) {
+          fallidas.current.push(file);
           setErrores((er) => [...er, `${file.name}: ${(e as Error).message}`]);
         }
         setHechas((n) => n + 1);
@@ -131,7 +157,7 @@ export default function Importar() {
     };
     await Promise.all(Array.from({ length: EN_PARALELO }, trabajador));
     lock?.release().catch(() => {});
-    setFase(siguiente.current >= archivos.length ? "listo" : "pausado");
+    setFase(siguiente.current >= lista.length ? "listo" : "pausado");
   }
 
   useEffect(() => {
@@ -231,7 +257,7 @@ export default function Importar() {
       <div className="fixed inset-x-0 bottom-0 border-t border-line bg-ink/95 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur">
         <div className="mx-auto max-w-xl">
           {fase === "elegir" && (
-            <button onClick={arrancar} disabled={!total}
+            <button onClick={() => arrancar()} disabled={!total}
               className="w-full rounded-xl bg-brand py-4 text-lg font-bold text-ink disabled:opacity-40">
               Importar {total || ""} {total === 1 ? "foto" : "fotos"}
             </button>
@@ -242,7 +268,12 @@ export default function Importar() {
             </button>
           )}
           {fase === "pausado" && (
-            <button onClick={arrancar} className="w-full rounded-xl bg-brand py-4 text-lg font-bold text-ink">Continuar</button>
+            <button onClick={() => arrancar()} className="w-full rounded-xl bg-brand py-4 text-lg font-bold text-ink">Continuar</button>
+          )}
+          {fase === "listo" && errores.length > 0 && (
+            <button onClick={reintentar} className="mb-3 w-full rounded-xl border border-amber-400/50 py-3 font-semibold text-amber-200">
+              Reintentar {errores.length} con error
+            </button>
           )}
           {fase === "listo" && (
             <Link href="/revisar" className="block w-full rounded-xl bg-brand py-4 text-center text-lg font-bold text-ink">

@@ -14,19 +14,55 @@ function canvasDesde(src: CanvasImageSource, w: number, h: number) {
   return canvas;
 }
 
-async function aFoto(canvas: HTMLCanvasElement): Promise<Foto> {
-  const blob = await new Promise<Blob>((ok, err) =>
-    canvas.toBlob((b) => (b ? ok(b) : err(new Error("No se pudo procesar la imagen"))), "image/jpeg", CALIDAD),
-  );
-  const base64 = canvas.toDataURL("image/jpeg", CALIDAD).split(",")[1];
-  return { id: crypto.randomUUID(), blob, url: URL.createObjectURL(blob), base64 };
+function blobABase64(blob: Blob): Promise<string> {
+  return new Promise((ok, err) => {
+    const lector = new FileReader();
+    lector.onload = () => ok(String(lector.result).split(",")[1]);
+    lector.onerror = () => err(new Error("No se pudo leer la imagen"));
+    lector.readAsDataURL(blob);
+  });
 }
 
-export async function fotoDesdeArchivo(file: File): Promise<Foto> {
-  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-  const foto = await aFoto(canvasDesde(bitmap, bitmap.width, bitmap.height));
-  bitmap.close();
-  return foto;
+async function aFoto(canvas: HTMLCanvasElement): Promise<Foto> {
+  try {
+    const blob = await new Promise<Blob>((ok, err) => {
+      // Si el celu se queda sin memoria para imágenes, toBlob puede no responder nunca.
+      const t = setTimeout(() => err(new Error("El celular no pudo procesar la imagen")), 20_000);
+      canvas.toBlob((b) => {
+        clearTimeout(t);
+        if (b) ok(b);
+        else err(new Error("No se pudo procesar la imagen"));
+      }, "image/jpeg", CALIDAD);
+    });
+    // El base64 sale del JPEG ya comprimido, sin volver a codificar la imagen.
+    const base64 = await blobABase64(blob);
+    return { id: crypto.randomUUID(), blob, url: URL.createObjectURL(blob), base64 };
+  } finally {
+    // iPhone tiene un tope de memoria para canvas y no la libera solo: achicarlo a 0 la devuelve.
+    // Sin esto, después de ~30 fotos deja de procesar imágenes.
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+}
+
+// De a una foto por vez: decodificar una foto de 12 MP ocupa ~50 MB, y varias juntas cuelgan el celu.
+// Las subidas y la IA sí siguen en paralelo.
+let fila: Promise<unknown> = Promise.resolve();
+function enFila<T>(tarea: () => Promise<T>): Promise<T> {
+  const p = fila.then(tarea, tarea);
+  fila = p.catch(() => {});
+  return p;
+}
+
+export function fotoDesdeArchivo(file: File): Promise<Foto> {
+  return enFila(async () => {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    try {
+      return await aFoto(canvasDesde(bitmap, bitmap.width, bitmap.height));
+    } finally {
+      bitmap.close();
+    }
+  });
 }
 
 // Extrae N cuadros repartidos a lo largo del video.
@@ -59,6 +95,7 @@ export async function subirFotos(fotos: Foto[]): Promise<string[]> {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ cantidad: fotos.length }),
+    signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) {
     const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -72,6 +109,7 @@ export async function subirFotos(fotos: Foto[]): Promise<string[]> {
         method: "PUT",
         headers: { "content-type": "image/jpeg" },
         body: f.blob,
+        signal: AbortSignal.timeout(60_000), // con mala señal en el galpón, mejor fallar y seguir
       });
       if (!r.ok) throw new Error("Falló la subida de una foto");
     }),
