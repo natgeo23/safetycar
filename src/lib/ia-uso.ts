@@ -9,6 +9,17 @@ function precios(modelo: string, fecha: Date) {
   return fecha < new Date("2027-01-01T00:00:00Z") ? { entrada: 0.75, salida: 3.75 } : { entrada: 1.5, salida: 7.5 };
 }
 
+// Igual que registrarUso, con los tokens ya contados (respuestas del bot de WhatsApp, vía AI SDK).
+export async function registrarTokens(origen: "whatsapp" | "analizar", modelo: string, entrada: number, salida: number) {
+  try {
+    const p = precios(modelo, new Date());
+    const costo = (entrada * p.entrada + salida * p.salida) / 1_000_000;
+    await db().from("ia_uso").insert({ origen, modelo, tokens_entrada: entrada, tokens_salida: salida, costo_usd: costo });
+  } catch (e) {
+    console.warn("ia_uso:", e);
+  }
+}
+
 // Guarda cuántos tokens usó una respuesta y cuánto costó. Nunca rompe el flujo si falla.
 export async function registrarUso(origen: "whatsapp" | "analizar", modelo: string, r: GenerateContentResponse) {
   try {

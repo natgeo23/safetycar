@@ -9,9 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.106",
     "@google/genai": "^2.30.0",
+    "@natgeo23/nucleo-whatsapp": "^0.1.2",
     "@supabase/supabase-js": "^2.118.0",
     "@zxing/browser": "^0.2.1",
+    "ai": "^7.0.154",
     "next": "16.4.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
